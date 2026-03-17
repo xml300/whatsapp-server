@@ -1,42 +1,68 @@
 
 import makeWASocket, { DisconnectReason, useMultiFileAuthState } from "baileys";
 import { Boom } from "@hapi/boom";
-import QRCode from "qrcode";
 import { EventEmitter } from "events";
 import pino from "pino";
-import { ConnectionStatus } from "../utils/types";
-import type { WhatsappEvents } from "../utils/types";
-import { formatJid } from "../utils/helpers";
+import { ConnectionStatus } from "../types/types.js";
+import type { WhatsappEvents } from "../types/types.js";
+import { formatJid } from "../utils/helpers.js";
+
+interface ClientStateInfo {
+    socket: ReturnType<typeof makeWASocket> | null;
+    status: ConnectionStatus;
+    isPairingReady: boolean;
+    qr: string | null
+}
+
 
 class WhatsappService {
-    private sock: ReturnType<typeof makeWASocket> | null;
-    private emitter: EventEmitter;
-    private status: ConnectionStatus;
-    private qr: string | null;
+    private sockets: Map<string, ClientStateInfo>;
 
     constructor() {
-        this.sock = null;
-        this.emitter = new EventEmitter();
-        this.status = ConnectionStatus.DISCONNECTED;
-        this.qr = null;
+        this.sockets = new Map();
     }
 
-    on<K extends keyof WhatsappEvents>(event: K, listener: WhatsappEvents[K]) {
-        this.emitter.on(event, listener);
+    // on<K extends keyof WhatsappEvents>(event: K, listener: WhatsappEvents[K]) {
+    //     this.emitter.on(event, listener);
+    // }
+
+    isConnected(apiKey: string) {
+        const stateInfo = this.sockets.get(apiKey);
+        if (!stateInfo) {
+            return false;
+        }
+        return stateInfo.status === ConnectionStatus.CONNECTED;
     }
 
-    isConnected() {
-        return this.status === ConnectionStatus.CONNECTED;
+    isConnectionReady(apiKey: string) {
+        const stateInfo = this.sockets.get(apiKey);
+        if (!stateInfo) {
+            return false;
+        }
+        return stateInfo.isPairingReady;
     }
 
-    getQrCode(){
-        return this.qr;
+    getQrCode(apiKey: string) {
+        const stateInfo = this.sockets.get(apiKey);
+        if (!stateInfo) {
+            throw new Error("No socket found for API key");
+        }
+        return stateInfo.qr;
     }
 
-    async connect() {
-        const { state, saveCreds } = await useMultiFileAuthState('auth_info_folder');
+    getPairingCode(apiKey: string, phoneNumber: string) {
+        const stateInfo = this.sockets.get(apiKey);
+        if (!stateInfo) {
+            throw new Error("No socket found for API key");
+        }
+        return stateInfo.socket?.requestPairingCode(phoneNumber);
+    }
 
-        this.sock = makeWASocket({
+    async connect(apiKey: string, username: string) {
+        const { state, saveCreds } = await useMultiFileAuthState(username);
+
+        const socket = makeWASocket({
+            version: [2, 3000, 1034195523],
             auth: state,
             logger: pino(
                 pino.destination('./server.log')
@@ -44,82 +70,117 @@ class WhatsappService {
             browser: ["Ubuntu", "Chrome", "20.0.04"]
         });
 
-        this.registerConnectionHandler();
-        this.sock.ev.on('creds.update', saveCreds);
-        this.registerMessageHandler();
+        const stateInfo: ClientStateInfo = {
+            socket,
+            status: ConnectionStatus.DISCONNECTED,
+            isPairingReady: false,
+            qr: null
+        }
+
+        this.registerConnectionHandler(stateInfo, apiKey, username);
+        socket.ev.on('creds.update', saveCreds);
+        this.registerMessageHandler(stateInfo);
+
+
+        this.sockets.set(apiKey, stateInfo);
     }
 
-    async disconnect() {
-        this.sock?.end(undefined);
-        this.sock = null;
-        this.status = ConnectionStatus.DISCONNECTED;
+    async disconnect(apiKey: string) {
+        const stateInfo = this.sockets.get(apiKey);
+        if (!stateInfo) {
+            throw new Error("No socket found for API key");
+        }
+        stateInfo.socket?.end(undefined);
+        this.sockets.delete(apiKey);
     }
 
-    private registerConnectionHandler() {
-        this.sock?.ev.on('connection.update', async (update) => {
-            console.log(update);
+    private getSocket(apiKey: string) {
+        const stateInfo = this.sockets.get(apiKey);
+        if (!stateInfo) {
+            throw new Error("No socket found for API key");
+        }
+        return stateInfo.socket;
+    }
+
+    private getStatus(apiKey: string) {
+        const stateInfo = this.sockets.get(apiKey);
+        if (!stateInfo) {
+            throw new Error("No socket found for API key");
+        }
+        return stateInfo.status;
+    }
+
+    private registerConnectionHandler(stateInfo: ClientStateInfo, apiKey: string, username: string) {
+        const { socket } = stateInfo;
+        socket?.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
+            console.log(JSON.stringify(update, null, 2))
             if (qr) {
-                console.log("QR Created.")
-                await QRCode.toFile('qr.png', qr);
-                this.qr = await QRCode.toDataURL(qr);
-                this.emitter.emit('qr', this.qr);
+                stateInfo.isPairingReady = true;
+                stateInfo.qr = qr;
             }
             if (connection === 'close') {
                 const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                this.status = ConnectionStatus.DISCONNECTED;
+                stateInfo.status = ConnectionStatus.DISCONNECTED;
                 if (shouldReconnect) {
                     console.log("Connection closed. Reconnecting...");
-                    setTimeout(() => this.connect(), 5000);
+                    setTimeout(() => this.connect(apiKey, username), 5000);
                 } else {
                     console.log("Connection closed. Not reconnecting...");
                 }
             } else if (connection === 'open') {
                 console.log("✅ WhatsApp is connected!");
-                this.status = ConnectionStatus.CONNECTED;
-                this.emitter.emit('connected');
+                stateInfo.status = ConnectionStatus.CONNECTED;
+                // this.emitter.emit('connected');
             }
         });
     }
 
-    private registerMessageHandler() {
-        this.sock?.ev.on('messages.upsert', async m => {
-            const message = m.messages[0];
-
-            const text = message.message?.conversation;
-            const sender = message.key.remoteJid;
-            console.log('New message received:', sender, text);
+    private registerMessageHandler(stateInfo: ClientStateInfo) {
+        const { socket } = stateInfo;
+        socket?.ev.on('messages.upsert', async m => {
+            for (const message of m.messages) {
+                const text = message.message?.conversation;
+                const sender = message.key.remoteJid;
+                console.log('New message received:', sender, text);
+            }
         });
     }
 
-    async sendTyping(phoneNumber: string) {
-        if (this.status !== ConnectionStatus.CONNECTED) {
+    async sendTyping(apiKey: string, phoneNumber: string) {
+        const status = this.getStatus(apiKey);
+        if (status !== ConnectionStatus.CONNECTED) {
             throw new Error("WhatsApp is not connected");
         }
-        await this.sock?.sendPresenceUpdate('composing', formatJid(phoneNumber));
+        const socket = this.getSocket(apiKey);
+        await socket?.sendPresenceUpdate('composing', formatJid(phoneNumber));
         return true;
     }
 
-    async sendMessage(phoneNumber: string, msgText: string) {
-        if (this.status !== ConnectionStatus.CONNECTED) {
+    async sendMessage(apiKey: string, phoneNumber: string, msgText: string) {
+        const status = this.getStatus(apiKey);
+        if (status !== ConnectionStatus.CONNECTED) {
             throw new Error("WhatsApp is not connected");
         }
-        const message = await this.sock?.sendMessage(formatJid(phoneNumber), {
+        const socket = this.getSocket(apiKey);
+        const message = await socket?.sendMessage(formatJid(phoneNumber), {
             text: msgText
         });
         return message;
     }
 
-    async sendMediaFile(phoneNumber: string, file: File, caption?: string) {
-        if (this.status !== ConnectionStatus.CONNECTED) {
+    async sendMediaFile(apiKey: string, phoneNumber: string, file: File, caption?: string) {
+        const status = this.getStatus(apiKey);
+        if (status !== ConnectionStatus.CONNECTED) {
             throw new Error("WhatsApp is not connected");
         }
-        const message = await this.sock?.sendMessage(formatJid(phoneNumber), {
+        const socket = this.getSocket(apiKey);
+        const message = await socket?.sendMessage(formatJid(phoneNumber), {
             document: Buffer.from(await file.arrayBuffer()),
             mimetype: file.type,
             fileName: file.name,
-            caption: caption
+            caption: caption || ""
         })
         return message;
     }
