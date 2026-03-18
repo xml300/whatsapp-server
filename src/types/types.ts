@@ -1,8 +1,10 @@
+import type { WAMessage } from "baileys";
+
 export type WhatsappEvents = {
-    connected: () => void;
-    disconnected: (reason: string) => void;
-    qr: (dataUrl: string) => void;
-    message: (data: { sender: string | null; text: string | null; raw: any }) => void;
+    connected: (apiKey: string) => void;
+    disconnected: (apiKey: string, reason: string) => void;
+    qr: (apiKey: string, dataUrl: string) => void;
+    message: (apiKey: string, data: WAMessage) => void;
 };
 
 export enum ConnectionStatus {

@@ -2,11 +2,34 @@ import express from "express";
 import { whatsappService } from "../lib/whatsappService.js";
 import multer from "multer";
 import authMiddleware from "../middleware/auth.js";
+import { logger } from "../lib/logger.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 router.use(authMiddleware);
- 
+
+router.get('/stream', (req, res) => {
+    res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        'connection': 'keep-alive'
+    });
+
+    res.write(`data: {"status": "connected"}\n\n`);
+
+    whatsappService.on('message', (apiKey, message) => {
+        if (apiKey === req.apiKey) {
+            return;
+        }
+        res.write(`event:message\ndata: ${JSON.stringify(message)}\n\n`);
+    });
+
+    req.on('close', () => {
+        console.log('Client disconnected');
+        res.end();
+    })
+});
+
 router.get('/status', (req, res) => {
     const apiKey = req.apiKey;
     const connected = whatsappService.isConnected(apiKey);
@@ -24,7 +47,7 @@ router.get('/qr', (req, res) => {
     }
 });
 
-router.get('/pair-code', async(req, res) => {
+router.get('/pair-code', async (req, res) => {
     const apiKey = req.apiKey;
     const { phoneNumber } = req.body;
     if (!phoneNumber) {
@@ -34,7 +57,7 @@ router.get('/pair-code', async(req, res) => {
     if (code) {
         res.json({ status: "success", code });
     } else {
-        res.json({status: "error", message: "No pairing code available"})
+        res.json({ status: "error", message: "No pairing code available" })
     }
 })
 
@@ -62,7 +85,7 @@ router.post('/send/file', upload.single('file'), async (req, res) => {
     const apiKey = req.apiKey;
     const { phoneNumber, caption } = req.body;
     const file = req.file;
-    console.log(req.body, req.file)
+    logger.info({ body: req.body, file: req.file })
     if (!phoneNumber || !file) {
         return res.status(400).json({ status: "error", message: "Phone number and file are required" });
     }

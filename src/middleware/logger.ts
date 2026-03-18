@@ -27,7 +27,7 @@ function colorForMethod(method: string): string {
     }
 }
 
-export function logger(req: Request, res: Response, next: NextFunction): void {
+export function loggingMiddleware(req: Request, res: Response, next: NextFunction): void {
     const start = process.hrtime.bigint();
 
     res.on("finish", () => {
