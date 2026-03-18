@@ -1,3 +1,4 @@
 node_modules/
 auth/
 auth_info_folder/
+dist/
