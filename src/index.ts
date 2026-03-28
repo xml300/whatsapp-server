@@ -2,7 +2,7 @@ import express from "express";
 import { whatsappService } from "./lib/whatsappService.js";
 import whatsappRoutes from "./routes/whatsappRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
-import { loggingMiddleware } from "./middleware/logger.js";
+import { loggingMiddleware } from "./middleware/logging.js";
 import { logger } from "./lib/logger.js";
 import { swaggerDocs, swaggerUI } from "./lib/swagger.js";
 import { apiReference } from "@scalar/express-api-reference";

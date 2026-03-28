@@ -1,8 +1,7 @@
 import { Credential, KeyStore } from "../data/db.js";
 import { BufferJSON, initAuthCreds, proto } from 'baileys';
 import type { AuthenticationState, AuthenticationCreds, SignalDataTypeMap } from 'baileys';
-
-
+ 
 export const useNoSQLAuthState = async (
 	phoneNumber: string
 ): Promise<{ state: AuthenticationState; saveCreds: () => Promise<void> }> => {
@@ -73,16 +72,20 @@ export const useNoSQLAuthState = async (
 						}
 					}
 
-					const ops = keys.map(key => ({
+					const ops = keys.map(entry => ({
 						updateOne: {
-							filter: {phoneNumber: phoneNumber, key: key.key},
-							update: {$set: key},
+							filter: {phoneNumber: phoneNumber, key: entry.key},
+							update: {$set: entry},
 							upsert: true
 						}
 					}))
-
-					await KeyStore.bulkWrite(ops);
-					await KeyStore.deleteMany({ phoneNumber: phoneNumber, key: { $in: toDeleteKeys } });
+					 
+					if(ops.length > 0){
+						await KeyStore.bulkWrite(ops);
+					}
+					if(toDeleteKeys.length > 0){
+						await KeyStore.deleteMany({ phoneNumber: phoneNumber, key: { $in: toDeleteKeys } });
+					}
 				}
 			}
 		},

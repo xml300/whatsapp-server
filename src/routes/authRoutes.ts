@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { createHash } from "crypto";
 import { dataStore } from "../lib/dataStore.js";
 import { whatsappService } from "../lib/whatsappService.js";
 import authMiddleware from "../middleware/auth.js";
@@ -24,14 +25,21 @@ const router = Router();
  *       200:
  *         description: User registered successfully
  */
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
     const { phoneNumber } = req.body;
     if (!phoneNumber) {
         return res.json({ status: "error", message: "Phone number is required" })
     }
-    const apiKey = crypto.randomUUID();
-    dataStore.writeData({ apiKey, phoneNumber });
-    return res.json({ status: "success", apiKey });
+
+    try{ 
+        const userId = createHash('sha256').update(phoneNumber).digest('hex');
+        const apiKey = crypto.randomUUID();
+        const user = await dataStore.createUser({ id: userId, apiKey, phoneNumber });
+        return res.json({ status: "success", apiKey });
+    }catch(error){
+        console.log(error)
+        return res.json({ status: "error", message: "Failed to create user" })
+    }
 });
 
 /**
@@ -47,12 +55,12 @@ router.post('/register', (req, res) => {
  */
 router.post('/connect', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
-    const user = dataStore.readData(apiKey);
+    const user = await dataStore.getUser(apiKey);
     if (!user || !user.phoneNumber) {
         return res.json({ status: "error", message: "Invalid API Key" })
     }
     const stateInfo = await whatsappService.connect(apiKey, user.phoneNumber);
-    return res.json({ status: "success", t:stateInfo.qr });
+    return res.json({ status: "success", serviceStatus: stateInfo.status });
 });
 
 /**
@@ -66,9 +74,9 @@ router.post('/connect', authMiddleware, async (req, res) => {
  *       200:
  *         description: Whether the connection is ready
  */
-router.get('/connect/status', authMiddleware, (req, res) => {
+router.get('/connect/status', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
-    const user = dataStore.readData(apiKey);
+    const user = await dataStore.getUser(apiKey);
     if (!user || !user.phoneNumber) {
         return res.json({ status: "error", message: "Invalid API Key" })
     }
@@ -87,9 +95,9 @@ router.get('/connect/status', authMiddleware, (req, res) => {
  *       200:
  *         description: QR code string
  */
-router.get('/connect/qr', authMiddleware, (req, res) => {
+router.get('/connect/qr', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
-    const user = dataStore.readData(apiKey);
+    const user = await dataStore.getUser(apiKey);
     if (!user || !user.phoneNumber) {
         return res.json({ status: "error", message: "Invalid API Key" })
     }
@@ -110,7 +118,7 @@ router.get('/connect/qr', authMiddleware, (req, res) => {
  */
 router.get('/connect/pairing-code', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
-    const user = dataStore.readData(apiKey);
+    const user = await dataStore.getUser(apiKey);
     if (!user || !user.phoneNumber) {
         return res.json({ status: "error", message: "Invalid API Key" })
     }
