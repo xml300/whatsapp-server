@@ -5,6 +5,25 @@ import authMiddleware from "../middleware/auth.js";
 
 const router = Router();
 
+/**
+ * @openapi
+ * /api/auth/register:
+ *   post:
+ *     summary: Register a new user
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *                 description: User's phone number
+ *     responses:
+ *       200:
+ *         description: User registered successfully
+ */
 router.post('/register', (req, res) => {
     const { phoneNumber } = req.body;
     if (!phoneNumber) {
@@ -15,6 +34,17 @@ router.post('/register', (req, res) => {
     return res.json({ status: "success", apiKey });
 });
 
+/**
+ * @openapi
+ * /api/auth/connect:
+ *   post:
+ *     summary: Connect to WhatsApp
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Connection status and QR code if available
+ */
 router.post('/connect', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
     const user = dataStore.readData(apiKey);
@@ -25,6 +55,17 @@ router.post('/connect', authMiddleware, async (req, res) => {
     return res.json({ status: "success", t:stateInfo.qr });
 });
 
+/**
+ * @openapi
+ * /api/auth/connect/status:
+ *   get:
+ *     summary: Get connection status
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Whether the connection is ready
+ */
 router.get('/connect/status', authMiddleware, (req, res) => {
     const apiKey = req.apiKey;
     const user = dataStore.readData(apiKey);
@@ -35,6 +76,17 @@ router.get('/connect/status', authMiddleware, (req, res) => {
     return res.json({ status: "success", isConnectionReady });
 });
 
+/**
+ * @openapi
+ * /api/auth/connect/qr:
+ *   get:
+ *     summary: Get QR code for connection
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: QR code string
+ */
 router.get('/connect/qr', authMiddleware, (req, res) => {
     const apiKey = req.apiKey;
     const user = dataStore.readData(apiKey);
@@ -45,6 +97,17 @@ router.get('/connect/qr', authMiddleware, (req, res) => {
     return res.json({ status: "success", qr });
 });
 
+/**
+ * @openapi
+ * /api/auth/connect/pairing-code:
+ *   get:
+ *     summary: Get pairing code for connection
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Pairing code string
+ */
 router.get('/connect/pairing-code', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
     const user = dataStore.readData(apiKey);

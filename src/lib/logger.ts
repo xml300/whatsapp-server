@@ -1,4 +1,3 @@
-
 export const logger = {
     info: (message: string | Record<string, any>) => console.log(`[INFO] ${typeof message === "string" ? message : JSON.stringify(message)}`),
     debug: (message: string | Record<string, any>) => console.log(`[DEBUG] ${typeof message === "string" ? message : JSON.stringify(message)}`),

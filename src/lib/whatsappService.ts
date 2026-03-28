@@ -1,5 +1,5 @@
 
-import makeWASocket, { DisconnectReason, useMultiFileAuthState } from "baileys";
+import makeWASocket, { DisconnectReason } from "baileys";
 import { Boom } from "@hapi/boom";
 import { EventEmitter } from "events";
 import pino from "pino";
@@ -7,6 +7,8 @@ import { ConnectionStatus } from "../types/types.js";
 import type { WhatsappEvents } from "../types/types.js";
 import { formatJid } from "../utils/helpers.js";
 import { logger } from "./logger.js";
+import { useNoSQLAuthState } from "./auth.js";
+
 
 interface ClientStateInfo {
     socket: ReturnType<typeof makeWASocket> | null;
@@ -14,7 +16,6 @@ interface ClientStateInfo {
     isPairingReady: boolean;
     qr: string | null;
 }
-
 
 class WhatsappService {
     private sockets: Map<string, ClientStateInfo>;
@@ -69,9 +70,8 @@ class WhatsappService {
         return await stateInfo.socket?.requestPairingCode(phoneNumber);
     }
 
-    async connect(apiKey: string, username: string) {
-        const { state, saveCreds } = await useMultiFileAuthState("auth/" + username);
-
+    async connect(apiKey: string, phoneNumber: string) {
+        const { state, saveCreds } = await useNoSQLAuthState(phoneNumber);
         const socket = makeWASocket({
             version: [2, 3000, 1034195523],
             auth: state,
@@ -88,11 +88,9 @@ class WhatsappService {
             qr: null
         }
 
-        this.registerConnectionHandler(stateInfo, apiKey, username);
+        this.registerConnectionHandler(stateInfo, apiKey, phoneNumber);
         socket.ev.on('creds.update', saveCreds);
         this.registerMessageHandler(stateInfo, apiKey);
-
-
         this.sockets.set(apiKey, stateInfo);
         return stateInfo;
     }
@@ -190,7 +188,7 @@ class WhatsappService {
         return message;
     }
 
-    async sendMediaFile(apiKey: string, phoneNumber: string, file: File, caption?: string) {
+    async sendMediaFile(apiKey: string, phoneNumber: string, file: Express.Multer.File, caption?: string) {
         const status = this.getStatus(apiKey);
         if (status !== ConnectionStatus.CONNECTED) {
             logger.info("WhatsApp is not connected");
@@ -198,9 +196,9 @@ class WhatsappService {
         }
         const socket = this.getSocket(apiKey);
         const message = await socket?.sendMessage(formatJid(phoneNumber), {
-            document: Buffer.from(await file.arrayBuffer()),
-            mimetype: file.type,
-            fileName: file.name,
+            document: file.buffer,
+            mimetype: file.mimetype,
+            fileName: file.originalname,
             caption: caption || ""
         })
         return message;

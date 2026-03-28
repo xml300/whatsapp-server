@@ -8,6 +8,17 @@ const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 router.use(authMiddleware);
 
+/**
+ * @openapi
+ * /api/stream:
+ *   get:
+ *     summary: Connect to message stream (SSE)
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Event source stream
+ */
 router.get('/stream', (req, res) => {
     res.writeHead(200, {
         'content-type': 'text/event-stream',
@@ -18,7 +29,7 @@ router.get('/stream', (req, res) => {
     res.write(`data: {"status": "connected"}\n\n`);
 
     whatsappService.on('message', (apiKey, message) => {
-        if (apiKey === req.apiKey) {
+        if (apiKey !== req.apiKey) {
             return;
         }
         res.write(`event:message\ndata: ${JSON.stringify(message)}\n\n`);
@@ -30,6 +41,17 @@ router.get('/stream', (req, res) => {
     })
 });
 
+/**
+ * @openapi
+ * /api/status:
+ *   get:
+ *     summary: GET WhatsApp connection status
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Connection status
+ */
 router.get('/status', (req, res) => {
     const apiKey = req.apiKey;
     const connected = whatsappService.isConnected(apiKey);
@@ -37,60 +59,129 @@ router.get('/status', (req, res) => {
     res.json({ status: connected ? "connected" : "disconnected", connected, connectionReady });
 })
 
-router.get('/qr', (req, res) => {
-    const apiKey = req.apiKey;
-    const qr = whatsappService.getQrCode(apiKey);
-    if (qr) {
-        res.json({ status: "success", qr });
-    } else {
-        res.status(404).json({ status: "error", message: "No QR code available" });
-    }
-});
-
-router.get('/pair-code', async (req, res) => {
+/**
+ * @openapi
+ * /api/send/typing:
+ *   post:
+ *     summary: Send typing indicator
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Success
+ *       400:
+ *         description: Phone number required
+ */
+router.post('/send/typing', async (req, res) => {
     const apiKey = req.apiKey;
     const { phoneNumber } = req.body;
+    if(!apiKey){
+        return res.status(401).json({status: "error", message: "Unauthorized"});
+    }
+
     if (!phoneNumber) {
         return res.status(400).json({ status: "error", message: "Phone number is required" });
     }
-    const code = await whatsappService.getPairingCode(apiKey, phoneNumber);
-    if (code) {
-        res.json({ status: "success", code });
-    } else {
-        res.json({ status: "error", message: "No pairing code available" })
-    }
-})
+    const success = await whatsappService.sendTyping(apiKey, phoneNumber);
 
-router.post('/send/typing', (req, res) => {
-    const apiKey = req.apiKey;
-    const { phoneNumber } = req.body;
-    if (!phoneNumber) {
-        return res.status(400).json({ status: "error", message: "Phone number is required" });
+    if(!success){
+        return res.status(400).json({ status: "error", message: "Failed to send typing indicator" });
     }
-    whatsappService.sendTyping(apiKey, phoneNumber);
+
     res.json({ status: "success", message: "Typing sent successfully" });
 });
 
+/**
+ * @openapi
+ * /api/send/text:
+ *   post:
+ *     summary: Send text message
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *               message:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Success
+ *       400:
+ *         description: Phone number and message required
+ */
 router.post('/send/text', async (req, res) => {
     const apiKey = req.apiKey;
     const { phoneNumber, message } = req.body;
+    if(!apiKey){
+        return res.status(401).json({status: "error", message: "Unauthorized"});
+    }
     if (!phoneNumber || !message) {
         return res.status(400).json({ status: "error", message: "Phone number and message are required" });
     }
-    await whatsappService.sendMessage(apiKey, phoneNumber, message);
+    const success = await whatsappService.sendMessage(apiKey, phoneNumber, message);
+    if(!success){
+        return res.status(400).json({ status: "error", message: "Failed to send message" });
+    }
     res.json({ status: "success", message: "Message sent successfully" });
 });
 
+/**
+ * @openapi
+ * /api/send/file:
+ *   post:
+ *     summary: Send media file
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *               caption:
+ *                 type: string
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Success
+ *       400:
+ *         description: Phone number and file required
+ */
 router.post('/send/file', upload.single('file'), async (req, res) => {
     const apiKey = req.apiKey;
     const { phoneNumber, caption } = req.body;
     const file = req.file;
-    logger.info({ body: req.body, file: req.file })
+    logger.info({ body: req.body, file: req.file?.originalname });
+    if(!apiKey){
+        return res.status(401).json({status: "error", message: "Unauthorized"});
+    }
     if (!phoneNumber || !file) {
         return res.status(400).json({ status: "error", message: "Phone number and file are required" });
     }
-    const newFile = new File([Buffer.from(file.buffer)], file.originalname, { type: file.mimetype, lastModified: Date.now() });
-    await whatsappService.sendMediaFile(apiKey, phoneNumber, newFile, caption);
+    const success = await whatsappService.sendMediaFile(apiKey, phoneNumber, file, caption);
+    if(!success){
+        return res.status(400).json({ status: "error", message: "Failed to send file" });
+    }
     res.json({ status: "success", message: "File sent successfully" });
 });
 
