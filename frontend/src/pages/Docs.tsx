@@ -223,6 +223,54 @@ responses: [
   }
 ]
     },
+    {
+      category: "Authentication",
+      method: "GET" as const,
+      path: "/api/auth/connect/pairing-code",
+      title: "Get Pairing Code",
+      description: "Retrieve an 8-digit pairing code to manually link your phone to the API via 'Link with phone number instead' in WhatsApp. This is an alternative to scanning a QR code.",
+      parameters: [],
+      snippets: [
+        {
+          name: "cURL",
+          language: "bash",
+          code: `curl ${BASE_URL}/api/auth/connect/pairing-code \\
+  -H "x-api-key: YOUR_API_KEY"`
+        },
+        {
+          name: "JavaScript",
+          language: "javascript",
+          code: `const response = await fetch('${BASE_URL}/api/auth/connect/pairing-code', {
+  headers: { 'x-api-key': 'YOUR_API_KEY' }
+});
+
+const { pairingCode } = await response.json();
+console.log('Pairing Code:', pairingCode);`
+        },
+        {
+          name: "Python",
+          language: "python",
+          code: `import requests
+
+response = requests.get(
+    "${BASE_URL}/api/auth/connect/pairing-code",
+    headers={"x-api-key": "YOUR_API_KEY"}
+)
+
+print('Pairing Code:', response.json()["pairingCode"])`
+        }
+      ],
+      responses: [
+        {
+          name: "200 OK",
+          language: "json",
+          code: `{
+  "status": "success",
+  "pairingCode": "ABCD-1234"
+}`
+        }
+      ]
+    },
 {
   category: "Authentication",
     method: "GET" as const,
@@ -356,6 +404,122 @@ print(response.json())`
 }`
                   }
                 ]
+},
+{
+  category: "Messaging",
+  method: "POST" as const,
+  path: "/api/send/typing",
+  title: "Send Typing Indicator",
+  description: "Send a 'composing' or 'typing' status update to a specific recipient. This will show 'Typing...' under your contact name in their app for a few seconds.",
+  parameters: [
+    { name: "phoneNumber", type: "string", required: true, description: "Recipient's phone number without the + symbol (e.g., 1234567890)." }
+  ],
+  snippets: [
+    {
+      name: "cURL",
+      language: "bash",
+      code: `curl -X POST ${BASE_URL}/api/send/typing \\
+  -H "Content-Type: application/json" \\
+  -H "x-api-key: YOUR_API_KEY" \\
+  -d '{"phoneNumber": "1234567890"}'`
+    },
+    {
+      name: "JavaScript",
+      language: "javascript",
+      code: `await fetch('${BASE_URL}/api/send/typing', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': 'YOUR_API_KEY'
+  },
+  body: JSON.stringify({ phoneNumber: "1234567890" })
+});`
+    },
+    {
+      name: "Python",
+      language: "python",
+      code: `import requests
+
+requests.post(
+    "${BASE_URL}/api/send/typing",
+    headers={"x-api-key": "YOUR_API_KEY"},
+    json={"phoneNumber": "1234567890"}
+)`
+    }
+  ],
+  responses: [
+    {
+      name: "200 OK",
+      language: "json",
+      code: `{
+  "status": "success",
+  "message": "Typing sent successfully"
+}`
+    }
+  ]
+},
+{
+  category: "Messaging",
+  method: "POST" as const,
+  path: "/api/send/file",
+  title: "Send File / Media",
+  description: "Send a media file (PDF, Image, Video, Word doc) to a recipient. This endpoint consumes 'multipart/form-data'.",
+  parameters: [
+    { name: "phoneNumber", type: "string", required: true, description: "Recipient's phone number (e.g., 1234567890)." },
+    { name: "file", type: "binary", required: true, description: "The file to upload as media." },
+    { name: "caption", type: "string", required: false, description: "The caption to include with the media file." }
+  ],
+  snippets: [
+    {
+      name: "cURL",
+      language: "bash",
+      code: `curl -X POST ${BASE_URL}/api/send/file \\
+  -H "x-api-key: YOUR_API_KEY" \\
+  -F "phoneNumber=1234567890" \\
+  -F "caption=Here is the document" \\
+  -F "file=@/path/to/document.pdf"`
+    },
+    {
+      name: "JavaScript",
+      language: "javascript",
+      code: `const formData = new FormData();
+formData.append('phoneNumber', '1234567890');
+formData.append('caption', 'Example Invoice');
+formData.append('file', fileInput.files[0]);
+
+await fetch('${BASE_URL}/api/send/file', {
+  method: 'POST',
+  headers: { 'x-api-key': 'YOUR_API_KEY' },
+  body: formData
+});`
+    },
+    {
+      name: "Python",
+      language: "python",
+      code: `import requests
+
+files = {'file': open('document.pdf', 'rb')}
+data = {'phoneNumber': '1234567890', 'caption': 'Check this out'}
+headers = {'x-api-key': 'YOUR_API_KEY'}
+
+requests.post(
+    "${BASE_URL}/api/send/file",
+    headers=headers,
+    files=files,
+    data=data
+)`
+    }
+  ],
+  responses: [
+    {
+      name: "200 OK",
+      language: "json",
+      code: `{
+  "status": "success",
+  "message": "File sent successfully"
+}`
+    }
+  ]
 },
 {
   category: "Messaging",
@@ -615,8 +779,8 @@ return (
                 <div className="flex gap-4">
                   <div className="w-8 h-8 rounded-lg bg-primary-500/10 border border-primary-500/20 flex items-center justify-center text-sm font-bold text-primary-400 shrink-0 mt-0.5">3</div>
                   <div>
-                    <h4 className="text-white font-semibold mb-1">Scan the QR code</h4>
-                    <p className="text-sm text-slate-400 leading-relaxed">GET <code className="font-mono text-primary-400 text-xs">/api/auth/connect/qr</code> to retrieve the QR string. Render it and scan with WhatsApp → Linked Devices. Poll <code className="font-mono text-primary-400 text-xs">/api/status</code> until <code className="font-mono text-slate-400 text-xs">connectionReady: true</code>.</p>
+                    <h4 className="text-white font-semibold mb-1">Scan QR or use Pairing Code</h4>
+                    <p className="text-sm text-slate-400 leading-relaxed">GET <code className="font-mono text-primary-400 text-xs">/api/auth/connect/qr</code> for a QR code, or <code className="font-mono text-primary-400 text-xs">/api/auth/connect/pairing-code</code> for an 8-digit code. Link via WhatsApp → Linked Devices. Poll <code className="font-mono text-primary-400 text-xs">/api/status</code> until <code className="font-mono text-slate-400 text-xs">connected: true</code>.</p>
                   </div>
                 </div>
 

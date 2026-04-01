@@ -3,6 +3,7 @@ WORKDIR /build
 COPY package*.json .
 RUN npm install 
 COPY . .
+ENV VITE_BASE_URL="https://whats-api.duckdns.org/"
 RUN npm run build
 
 FROM node:alpine
@@ -13,5 +14,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /build/dist ./dist
 
 ENV PORT=3000
+
+EXPOSE $PORT 
 
 CMD ["npm", "start"]

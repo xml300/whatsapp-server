@@ -20,9 +20,13 @@ export function Dashboard() {
   
   const [qrCode, setQrCode] = useState("");
   const [status, setStatus] = useState("disconnected");
-  const [connectionReady, setConnectionReady] = useState(false);
+  const [connected, setConnected] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
+  
+  const [pairingCode, setPairingCode] = useState("");
+  const [isPairingMode, setIsPairingMode] = useState(false);
+  const [isGeneratingPairingCode, setIsGeneratingPairingCode] = useState(false);
   
   const [logs, setLogs] = useState<LogMessage[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -147,21 +151,46 @@ export function Dashboard() {
          addLog("info", `Status: ${statusData.status.toUpperCase()}`);
       }
       
-      setConnectionReady(statusData.connectionReady);
+      setConnected(statusData.connected);
       
-      if (!statusData.connectionReady) {
-        const qrRes = await fetch("/api/auth/connect/qr", { headers: { "x-api-key": apiKey } });
-        const qrData = await qrRes.json();
-        if (qrData.qr && qrData.qr !== qrCode) {
-          setQrCode(qrData.qr);
-          addLog("info", "New QR code available — scan with WhatsApp.");
-        } else if (!qrData.qr) {
-          setQrCode("");
+      if (!statusData.connected) {
+        // Only fetch QR if not in pairing mode and qrCode is empty or we need an update
+        if (!isPairingMode) {
+          const qrRes = await fetch("/api/auth/connect/qr", { headers: { "x-api-key": apiKey } });
+          const qrData = await qrRes.json();
+          if (qrData.qr && qrData.qr !== qrCode) {
+            setQrCode(qrData.qr);
+            addLog("info", "New QR code available — scan with WhatsApp.");
+          } else if (!qrData.qr) {
+            setQrCode("");
+          }
         }
       } else {
         setQrCode(""); 
+        setPairingCode("");
       }
     } catch { /* polling — silent retry */ }
+  };
+
+  const handleGetPairingCode = async () => {
+    if (!apiKey) return;
+    setIsGeneratingPairingCode(true);
+    setPairingCode("");
+    addLog("info", `GET /api/auth/connect/pairing-code — generating code for ${phoneNumber}...`);
+    try {
+      const res = await fetch("/api/auth/connect/pairing-code", { headers: { "x-api-key": apiKey } });
+      const data = await res.json();
+      if (data.pairingCode) {
+        setPairingCode(data.pairingCode);
+        addLog("info", `✓ Pairing code generated: ${data.pairingCode}`);
+      } else {
+        addLog("error", "Failed to generate pairing code", data);
+      }
+    } catch (err) {
+      addLog("error", "Failed to get pairing code", err);
+    } finally {
+      setIsGeneratingPairingCode(false);
+    }
   };
 
   useEffect(() => {
@@ -198,22 +227,22 @@ export function Dashboard() {
           
           {/* Connection Status Pill */}
           <div className="flex items-center gap-3">
-            <div className={cn(
-               "flex items-center gap-2.5 px-4 py-2 rounded-xl border transition-colors duration-500",
-               connectionReady ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
-               : status === 'connecting' ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-               : "bg-white/5 border-white/10 text-slate-400"
-            )}>
-               <div className="relative flex h-2 w-2">
-                 {(connectionReady || status === 'connecting') && (
-                   <span className={cn("animate-ping absolute inline-flex h-full w-full rounded-full opacity-75", connectionReady ? "bg-emerald-400" : "bg-amber-400")}></span>
-                 )}
-                 <span className={cn("relative inline-flex rounded-full h-2 w-2", connectionReady ? "bg-emerald-500" : status === 'connecting' ? "bg-amber-500" : "bg-slate-500")}></span>
-               </div>
-               <span className="text-sm font-semibold tracking-wide">
-                 {connectionReady ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Disconnected'}
-               </span>
-            </div>
+               <div className={cn(
+                "flex items-center gap-2.5 px-4 py-2 rounded-xl border transition-colors duration-500",
+                connected ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
+                : status === 'connecting' ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                : "bg-white/5 border-white/10 text-slate-400"
+             )}>
+                <div className="relative flex h-2 w-2">
+                  {(connected || status === 'connecting') && (
+                    <span className={cn("animate-ping absolute inline-flex h-full w-full rounded-full opacity-75", connected ? "bg-emerald-400" : "bg-amber-400")}></span>
+                  )}
+                  <span className={cn("relative inline-flex rounded-full h-2 w-2", connected ? "bg-emerald-500" : status === 'connecting' ? "bg-amber-500" : "bg-slate-500")}></span>
+                </div>
+                <span className="text-sm font-semibold tracking-wide">
+                  {connected ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Disconnected'}
+                </span>
+             </div>
             <Link 
               to="/docs" 
               className="p-2 rounded-xl border border-white/10 text-slate-400 hover:text-white hover:border-white/20 transition-colors"
@@ -324,29 +353,41 @@ export function Dashboard() {
             <div className={cn("p-6 md:p-8 rounded-2xl bg-white/[0.02] border border-white/[0.06] relative overflow-hidden transition-all duration-500", !apiKey ? "opacity-40 pointer-events-none" : "opacity-100")}>
               {/* Progress indicator */}
               <div className={cn("absolute top-0 left-0 w-full h-0.5 transition-opacity duration-700", 
-                connectionReady ? "bg-emerald-500/50 opacity-100" : "bg-gradient-to-r from-transparent via-primary-500/30 to-transparent opacity-0")} />
+                connected ? "bg-emerald-500/50 opacity-100" : "bg-gradient-to-r from-transparent via-primary-500/30 to-transparent opacity-0")} />
               
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
                   <div className={cn(
                     "w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold border shrink-0",
-                    connectionReady 
+                    connected 
                       ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
                       : "bg-primary-500/10 border-primary-500/20 text-primary-400"
                   )}>
-                    {connectionReady ? <Check className="w-4 h-4" /> : "2"}
+                    {connected ? <Check className="w-4 h-4" /> : "2"}
                   </div>
                   <div>
                     <h2 className="text-base font-bold text-white tracking-tight">Connect Device</h2>
-                    <p className="text-xs text-slate-500">Scan the QR code with WhatsApp</p>
+                    <p className="text-xs text-slate-500">{isPairingMode ? "Enter code on your phone" : "Scan the QR code with WhatsApp"}</p>
                   </div>
                 </div>
+                
+                {!connected && (
+                  <button 
+                    onClick={() => {
+                      setIsPairingMode(!isPairingMode);
+                      setPairingCode("");
+                    }}
+                    className="text-[10px] uppercase tracking-widest font-bold text-primary-500 hover:text-primary-400 transition-colors flex items-center gap-1.5"
+                  >
+                    {isPairingMode ? <><QrCode className="w-3 h-3" /> Use QR Code</> : <><Smartphone className="w-3 h-3" /> Use Pairing Code</>}
+                  </button>
+                )}
               </div>
 
               {/* QR / Status / Empty State */}
-              <div className="border border-white/5 rounded-xl flex flex-col items-center justify-center bg-black/30 overflow-hidden min-h-[250px]">
+              <div className="border border-white/5 rounded-xl flex flex-col items-center justify-center bg-black/30 overflow-hidden min-h-[300px]">
                  
-                {connectionReady ? (
+                {connected ? (
                    <div className="flex flex-col items-center text-center p-8">
                       <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4 shadow-[0_0_30px_rgba(16,185,129,0.15)]">
                          <Check className="w-7 h-7 text-emerald-400" />
@@ -354,6 +395,48 @@ export function Dashboard() {
                       <h3 className="text-lg font-bold text-white mb-1">Connected</h3>
                       <p className="text-slate-400 text-sm max-w-[220px]">Messages will appear in the event log.</p>
                    </div>
+                ) : isPairingMode ? (
+                  <div className="flex flex-col items-center p-8 w-full">
+                    {pairingCode ? (
+                      <>
+                        <div className="flex gap-2 mb-6">
+                          {pairingCode.split('').map((char, i) => (
+                            <div key={i} className={cn(
+                              "w-10 h-14 rounded-xl border border-white/10 bg-black/50 flex items-center justify-center text-2xl font-bold text-primary-400 shadow-xl",
+                              char === '-' && "w-6 border-none bg-transparent text-slate-600"
+                            )}>
+                              {char}
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-sm text-slate-300 font-medium mb-2 text-center">Pairing Code</p>
+                        <p className="text-xs text-slate-500 text-center max-w-[240px] mb-6">
+                          Enter this code on your phone in <span className="text-slate-400 font-semibold italic">Linked Devices → Link with phone number instead</span>
+                        </p>
+                        <button
+                          onClick={handleGetPairingCode}
+                          disabled={isGeneratingPairingCode}
+                          className="text-[10px] uppercase tracking-widest font-bold text-slate-500 hover:text-white transition-colors flex items-center gap-2"
+                        >
+                          <RefreshCw className={cn("w-3 h-3", isGeneratingPairingCode && "animate-spin")} />
+                          Generate New Code
+                        </button>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center text-center">
+                        <Smartphone className="w-10 h-10 text-slate-700 mb-4 stroke-1" />
+                        <h3 className="text-white font-bold mb-2">Ready to Pair</h3>
+                        <p className="text-xs text-slate-500 mb-6 max-w-[200px]">Click below to generate a pairing code for your WhatsApp.</p>
+                        <button
+                          onClick={handleGetPairingCode}
+                          disabled={isGeneratingPairingCode}
+                          className="bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium rounded-xl px-6 py-3 transition-all flex items-center gap-2 shadow-lg shadow-primary-900/20 disabled:opacity-50"
+                        >
+                          {isGeneratingPairingCode ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : "Generate Pairing Code"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ) : qrCode ? (
                   <div className="flex flex-col items-center p-6">
                     <div className="bg-white p-3 rounded-xl mb-4 shadow-2xl ring-4 ring-primary-500/10 relative overflow-hidden">
@@ -382,7 +465,7 @@ export function Dashboard() {
               </div>
               
               {/* Show reconnect when QR is active but not connected yet */}
-              {qrCode && !connectionReady && (
+              {!connected && qrCode && !isPairingMode && (
                 <p className="text-xs text-slate-500 mt-3 text-center">
                   Open WhatsApp → Settings → <span className="text-slate-400">Linked Devices</span> → Scan this code
                 </p>
