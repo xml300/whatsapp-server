@@ -541,7 +541,7 @@ return (
               <h5 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Base URL</h5>
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-sm font-mono text-primary-400 bg-primary-500/10 px-3 py-2 rounded-lg border border-primary-500/20 truncate">
-                  ${BASE_URL}
+                  {BASE_URL}
                 </code>
                 <button
                   onClick={handleCopyBaseUrl}

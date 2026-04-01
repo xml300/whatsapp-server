@@ -14,6 +14,4 @@ COPY --from=builder /build/dist ./dist
 
 ENV PORT=3000
 
-EXPOSE $PORT
-
 CMD ["npm", "start"]
