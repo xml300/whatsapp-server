@@ -1,4 +1,2 @@
-node_modules/
-auth/
-auth_info_folder/
+node_modules/ 
 dist/

@@ -6,9 +6,10 @@ import pino from "pino";
 import { ConnectionStatus } from "../types/types.js";
 import type { WhatsappEvents } from "../types/types.js";
 import { formatJid } from "../utils/helpers.js";
-import { logger } from "./logger.js";
+import { logger as _logger, nameLogger } from "./logger.js";
 import { useNoSQLAuthState } from "./auth.js";
 
+const logger = nameLogger(_logger, "WhatsappService");
 
 interface ClientStateInfo {
     socket: ReturnType<typeof makeWASocket> | null;
@@ -127,7 +128,7 @@ class WhatsappService {
         const { socket } = stateInfo;
         socket?.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
-            logger.info(JSON.stringify(update, null, 2))
+            logger.info("[131] " + JSON.stringify(update, null, 2))
             if (qr) {
                 stateInfo.isPairingReady = true;
                 stateInfo.qr = qr;
@@ -152,14 +153,17 @@ class WhatsappService {
 
     private registerMessageHandler(stateInfo: ClientStateInfo, apiKey: string) {
         const { socket } = stateInfo;
-        socket?.ev.on('messages.upsert', async m => {
-            for (const message of m.messages) {
+        socket?.ev.on('messages.upsert', async ({type, messages}) => {
+            if(type === "append"){
+              return;
+            }
+            
+            for (const message of messages) {
                 this.emit('message', apiKey, message)
                 const text = message.message?.conversation;
                 const time = parseInt(`${message.messageTimestamp}`);
                 const sender = message.key.remoteJid;
-                logger.info(JSON.stringify(message, null, 2))
-                logger.info(`New message received: ${sender} ${text} ${new Date(time * 1000)}`);
+                logger.info(`[165] New message received: ${sender} ${text} ${new Date(time * 1000)}`);
             }
         });
     }

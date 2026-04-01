@@ -12,6 +12,8 @@ COPY package*.json .
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /build/dist ./dist
 
-EXPOSE 3000
+ENV PORT=3000
 
-CMD ["npm", "run", "start"]
+EXPOSE $PORT
+
+CMD ["npm", "start"]
