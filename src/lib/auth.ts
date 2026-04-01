@@ -28,7 +28,7 @@ export const useNoSQLAuthState = async (
 		return keys.map(key => {
 			const value = JSON.parse(key.value || "null", BufferJSON.reviver);
 			return {
-				...key,
+				id: key.id,
 				value: type === 'app-state-sync-key' ? proto.Message.AppStateSyncKeyData.fromObject(value) : value
 			}
 		});

@@ -1,6 +1,13 @@
 import mongoose from "mongoose";
+import "dotenv/config";
 
-mongoose.connect("mongodb://127.0.0.1:27017/whatsapp")
+const DATABASE_URL = process.env.MONGODB_URL;
+
+if(!DATABASE_URL){
+    throw new Error("Please provide a MongoDB URL");
+}
+
+mongoose.connect(DATABASE_URL)
 .then(() => console.log("Connected to MongoDB"))
 .catch((err) => console.log(err));
 

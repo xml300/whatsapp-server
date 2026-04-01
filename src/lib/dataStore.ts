@@ -1,4 +1,3 @@
-import fs from "fs";
 import { User } from "../data/db.js";
 
 class DataStore {

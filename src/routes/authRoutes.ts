@@ -34,6 +34,7 @@ router.post('/register', async (req, res) => {
     try{ 
         const userId = createHash('sha256').update(phoneNumber).digest('hex');
         const apiKey = crypto.randomUUID();
+        console.log(userId, apiKey, phoneNumber);
         const user = await dataStore.createUser({ id: userId, apiKey, phoneNumber });
         return res.json({ status: "success", apiKey });
     }catch(error){
