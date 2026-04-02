@@ -3,6 +3,7 @@ import { whatsappService } from "../lib/whatsappService.js";
 import multer from "multer";
 import authMiddleware from "../middleware/auth.js";
 import { logger } from "../lib/logger.js";
+import { normalizePhoneNumber } from "../utils/helpers.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
@@ -43,24 +44,6 @@ router.get('/stream', (req, res) => {
 
 /**
  * @openapi
- * /api/status:
- *   get:
- *     summary: GET WhatsApp connection status
- *     security:
- *       - ApiKeyAuth: []
- *     responses:
- *       200:
- *         description: Connection status
- */
-router.get('/status', (req, res) => {
-    const apiKey = req.apiKey;
-    const connected = whatsappService.isConnected(apiKey);
-    const connectionReady = whatsappService.isConnectionReady(apiKey);
-    res.json({ status: connected ? "connected" : "disconnected", connected, connectionReady });
-})
-
-/**
- * @openapi
  * /api/send/typing:
  *   post:
  *     summary: Send typing indicator
@@ -83,13 +66,17 @@ router.get('/status', (req, res) => {
  */
 router.post('/send/typing', async (req, res) => {
     const apiKey = req.apiKey;
-    const { phoneNumber } = req.body;
+    const { phoneNumber: phoneNum } = req.body;
     if(!apiKey){
         return res.status(401).json({status: "error", message: "Unauthorized"});
     }
 
-    if (!phoneNumber) {
+    if (!phoneNum) {
         return res.status(400).json({ status: "error", message: "Phone number is required" });
+    }
+    const phoneNumber = normalizePhoneNumber(phoneNum);
+    if(!phoneNumber){
+        return res.status(400).json({ status: "error", message: "Invalid phone number" });
     }
     const success = await whatsappService.sendTyping(apiKey, phoneNumber);
 
@@ -126,12 +113,16 @@ router.post('/send/typing', async (req, res) => {
  */
 router.post('/send/text', async (req, res) => {
     const apiKey = req.apiKey;
-    const { phoneNumber, message } = req.body;
+    const { phoneNumber: phoneNum, message } = req.body;
     if(!apiKey){
         return res.status(401).json({status: "error", message: "Unauthorized"});
     }
-    if (!phoneNumber || !message) {
+    if (!phoneNum || !message) {
         return res.status(400).json({ status: "error", message: "Phone number and message are required" });
+    }
+    const phoneNumber = normalizePhoneNumber(phoneNum);
+    if(!phoneNumber){
+        return res.status(400).json({ status: "error", message: "Invalid phone number" });
     }
     const success = await whatsappService.sendMessage(apiKey, phoneNumber, message);
     if(!success){
@@ -169,14 +160,18 @@ router.post('/send/text', async (req, res) => {
  */
 router.post('/send/file', upload.single('file'), async (req, res) => {
     const apiKey = req.apiKey;
-    const { phoneNumber, caption } = req.body;
+    const { phoneNumber: phoneNum, caption } = req.body;
     const file = req.file;
     logger.info({ body: req.body, file: req.file?.originalname });
     if(!apiKey){
         return res.status(401).json({status: "error", message: "Unauthorized"});
     }
-    if (!phoneNumber || !file) {
+    if (!phoneNum || !file) {
         return res.status(400).json({ status: "error", message: "Phone number and file are required" });
+    }
+    const phoneNumber = normalizePhoneNumber(phoneNum);
+    if(!phoneNumber){
+        return res.status(400).json({ status: "error", message: "Invalid phone number" });
     }
     const success = await whatsappService.sendMediaFile(apiKey, phoneNumber, file, caption);
     if(!success){

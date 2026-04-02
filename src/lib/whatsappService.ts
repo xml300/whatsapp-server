@@ -8,6 +8,8 @@ import type { WhatsappEvents } from "../types/types.js";
 import { formatJid } from "../utils/helpers.js";
 import { logger as _logger, nameLogger } from "./logger.js";
 import { useNoSQLAuthState } from "./auth.js";
+import { Credential, KeyStore } from "../data/db.js";
+import { dataStore } from "./dataStore.js";
 
 const logger = nameLogger(_logger, "WhatsappService");
 
@@ -93,17 +95,30 @@ class WhatsappService {
         socket.ev.on('creds.update', saveCreds);
         this.registerMessageHandler(stateInfo, apiKey);
         this.sockets.set(apiKey, stateInfo);
-        return stateInfo;
+        return stateInfo.status;
     }
 
     async disconnect(apiKey: string) {
         const stateInfo = this.sockets.get(apiKey);
         if (!stateInfo) {
             logger.info("No socket found for API key");
-            return;
+            return false;
         }
         stateInfo.socket?.end(undefined);
         this.sockets.delete(apiKey);
+        const status = await this.clearSession(apiKey);
+        return status;
+    }
+
+    private async clearSession(apiKey: string){
+        const user = await dataStore.getUser(apiKey);
+        if(!user || !user.phoneNumber){
+            logger.info("No user found for API key");
+            return false;
+        }
+        await Credential.deleteOne({phoneNumber: user.phoneNumber});
+        await KeyStore.deleteMany({phoneNumber: user.phoneNumber});
+        return true;
     }
 
     private getSocket(apiKey: string) {

@@ -15,6 +15,11 @@ class DataStore {
         const user = await User.findOne({apiKey});
         return user;
     }
+
+    async updateUser(phoneNumber: string, update: Record<string, any>){
+        const user = await User.findOneAndUpdate({phoneNumber}, update, {new: true});
+        return user;
+    }
 }
 
 export const dataStore = new DataStore();

@@ -4,6 +4,8 @@ import { Landing } from "./pages/Landing";
 import { Dashboard } from "./pages/Dashboard";
 import { Docs } from "./pages/Docs";
 
+import { Logs } from "./pages/Logs";
+
 function App() {
   return (
     <BrowserRouter>
@@ -14,6 +16,7 @@ function App() {
             <Route path="/" element={<Landing />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/docs" element={<Docs />} />
+            <Route path="/logs" element={<Logs />} />
           </Routes>
         </main>
       </div>

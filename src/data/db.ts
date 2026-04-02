@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import "dotenv/config";
+import { logger } from "../lib/logger.js";
 
 const DATABASE_URL = process.env.MONGODB_URL;
 
@@ -8,8 +9,8 @@ if(!DATABASE_URL){
 }
 
 mongoose.connect(DATABASE_URL)
-.then(() => console.log("Connected to MongoDB"))
-.catch((err) => console.log(err));
+.then(() => logger.info("Connected to MongoDB"))
+.catch((err) => logger.error("Failed to connect to MongoDB " + err));
 
 const userSchema = new mongoose.Schema({
     id: {
@@ -34,13 +35,23 @@ const credentialSchema = new mongoose.Schema({
 });
 
 const keyStoreSchema = new mongoose.Schema({
+    id: String,
     key: String,
     value: String,
     phoneNumber: String,
     type: String,
-    id: String,
 });
+
+const logSchema = new mongoose.Schema({
+    id: String,
+    source: String,
+    message: String,
+    level: String,
+    timestamp: Date,
+});
+
 
 export const User = mongoose.model("User", userSchema);
 export const Credential = mongoose.model("Credential", credentialSchema);
 export const KeyStore = mongoose.model("KeyStore", keyStoreSchema);
+export const Log = mongoose.model("Log", logSchema);
