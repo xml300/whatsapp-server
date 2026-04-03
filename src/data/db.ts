@@ -13,7 +13,7 @@ mongoose.connect(DATABASE_URL)
 .catch((err) => logger.error("Failed to connect to MongoDB " + err));
 
 const userSchema = new mongoose.Schema({
-    id: {
+    _id: {
         type: String,
         required: true
     },

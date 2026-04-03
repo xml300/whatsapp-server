@@ -42,7 +42,7 @@ router.post('/register', async (req, res) => {
     try {
         const userId = createHash('sha256').update(phoneNumber).digest('hex');
         const apiKey = crypto.randomUUID();
-        const user = await dataStore.createUser({ id: userId, apiKey, phoneNumber });
+        const user = await dataStore.createUser({ _id: userId, apiKey, phoneNumber });
         return res.json({ status: "success", apiKey });
     } catch (error) {
         logger.error("Failed to create user " + error)

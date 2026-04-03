@@ -178,7 +178,7 @@ class WhatsappService {
                 const text = message.message?.conversation;
                 const time = parseInt(`${message.messageTimestamp}`);
                 const sender = message.key.remoteJid;
-                logger.info(`[165] New message received: ${sender} ${text} ${new Date(time * 1000)}`);
+                // logger.info(`[165] New message received: ${sender} ${text} ${new Date(time * 1000)}`);
             }
         });
     }

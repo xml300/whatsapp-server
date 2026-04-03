@@ -1,13 +1,13 @@
 import { Log } from "../data/db.js";
 
-async function log(message: string, level: string, source: string) {
+async function log(message: string, level: string, source?: string) {
     const id = crypto.randomUUID();
     await Log.insertOne({
         id: id,
         message: message,
         level: level,
         timestamp: Date.now(),
-        source: source
+        source: source || "system"
     })
     console.log(message);
 }

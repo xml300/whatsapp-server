@@ -1,7 +1,4 @@
 import express from "express";
-import path from 'path';
-import { fileURLToPath } from "url";
-
 import whatsappRoutes from "./routes/whatsappRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import { loggingMiddleware } from "./middleware/logging.js";
@@ -10,12 +7,10 @@ import { Log } from "./data/db.js";
 
 const app = express();
 const PORT = 3000;
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 app.use(loggingMiddleware);
 app.use(express.urlencoded({ extended: false }))
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'frontend/')));
 
 
 /**
@@ -57,9 +52,6 @@ app.get('/api/logs', async (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api', whatsappRoutes);
 
-app.use('/{*any}', (req, res) => {
-    res.sendFile(path.join(__dirname, 'frontend/index.html'));
-});
 
 app.listen(PORT, async () => {
     logger.info("Server is running on port 3000");

@@ -6,6 +6,11 @@ class DataStore {
     }
 
     async createUser(row: Record<string, any>){
+        const existingUser = await User.findOne({phoneNumber: row.phoneNumber});
+        if(existingUser){
+            throw new Error("User already exists");
+        }
+
         const user = new User(row);
         await user.save();
         return user;
