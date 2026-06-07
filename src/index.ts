@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import whatsappRoutes from "./routes/whatsappRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import { loggingMiddleware } from "./middleware/logging.js";
@@ -11,6 +12,12 @@ const PORT = 3000;
 app.use(loggingMiddleware);
 app.use(express.urlencoded({ extended: false }))
 app.use(express.json());
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key']
+}));
+
 
 
 /**
@@ -36,15 +43,15 @@ app.get('/api/logs', async (req, res) => {
     const logs = await Log.find({}, { __v: 0, _id: 0 })
         .sort({ timestamp: -1 })
         .skip(offset)
-        .limit(numLimit); 
+        .limit(numLimit);
     const logCount = await Log.countDocuments();
     const totalPages = Math.ceil(logCount / numLimit);
-    res.json({ 
+    res.json({
         totalPages,
         currentPage: numPage,
         logsPerPage: numLimit,
         totalLogs: logCount,
-        logs 
+        logs
     });
 });
 
@@ -53,6 +60,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api', whatsappRoutes);
 
 
-app.listen(PORT, async () => {
+app.listen(PORT, "0.0.0.0", async () => {
     logger.info("Server is running on port 3000");
 });

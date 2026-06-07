@@ -7,7 +7,6 @@ import { normalizePhoneNumber } from "../utils/helpers.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
-router.use(authMiddleware);
 
 /**
  * @openapi
@@ -20,7 +19,7 @@ router.use(authMiddleware);
  *       200:
  *         description: Event source stream
  */
-router.get('/stream', (req, res) => {
+router.get('/stream', authMiddleware, (req, res) => {
     res.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
@@ -64,7 +63,7 @@ router.get('/stream', (req, res) => {
  *       400:
  *         description: Phone number required
  */
-router.post('/send/typing', async (req, res) => {
+router.post('/send/typing', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
     const { phoneNumber: phoneNum } = req.body;
     if(!apiKey){
@@ -111,7 +110,7 @@ router.post('/send/typing', async (req, res) => {
  *       400:
  *         description: Phone number and message required
  */
-router.post('/send/text', async (req, res) => {
+router.post('/send/text', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
     const { phoneNumber: phoneNum, message } = req.body;
     if(!apiKey){
@@ -158,7 +157,7 @@ router.post('/send/text', async (req, res) => {
  *       400:
  *         description: Phone number and file required
  */
-router.post('/send/file', upload.single('file'), async (req, res) => {
+router.post('/send/file', authMiddleware, upload.single('file'), async (req, res) => {
     const apiKey = req.apiKey;
     const { phoneNumber: phoneNum, caption } = req.body;
     const file = req.file;
