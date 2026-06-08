@@ -33,6 +33,10 @@ class WhatsappService {
         this.emitter.on(event, listener);
     }
 
+    off<K extends keyof WhatsappEvents>(event: K, listener: WhatsappEvents[K]){
+        this.emitter.off(event, listener);
+    }
+
     emit<K extends keyof WhatsappEvents>(event: K, ...args: Parameters<WhatsappEvents[K]>) {
         this.emitter.emit(event, ...args);
     }
@@ -139,7 +143,7 @@ class WhatsappService {
         return stateInfo.status;
     }
 
-    private registerConnectionHandler(stateInfo: ClientStateInfo, apiKey: string, username: string) {
+    private registerConnectionHandler(stateInfo: ClientStateInfo, apiKey: string, phoneNumber: string) {
         const { socket } = stateInfo;
         socket?.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
@@ -154,7 +158,7 @@ class WhatsappService {
                 stateInfo.status = ConnectionStatus.DISCONNECTED;
                 if (shouldReconnect) {
                     logger.info("Connection closed. Reconnecting...");
-                    setTimeout(() => this.connect(apiKey, username), 5000);
+                    setTimeout(() => this.connect(apiKey, phoneNumber), 5000);
                 } else {
                     logger.info("Connection closed. Not reconnecting...");
                 }

@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import { logger } from "../lib/logger.js";
 
 const colors = {
     reset: "\x1b[0m",
@@ -41,7 +42,7 @@ export function loggingMiddleware(req: Request, res: Response, next: NextFunctio
         const methodColor = colorForMethod(req.method);
         const statusColor = colorForStatus(status);
 
-        console.log(
+        logger.info(
             `${colors.dim}[${timestamp}]${colors.reset} ` +
             `${methodColor}${req.method}${colors.reset} ` +
             `${req.originalUrl} ` +

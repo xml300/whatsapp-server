@@ -3,7 +3,8 @@ import { whatsappService } from "../lib/whatsappService.js";
 import multer from "multer";
 import authMiddleware from "../middleware/auth.js";
 import { logger } from "../lib/logger.js";
-import { normalizePhoneNumber } from "../utils/helpers.js";
+import validate from "../middleware/validate.js";
+import { rules } from "../utils/validators.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
@@ -28,15 +29,18 @@ router.get('/stream', authMiddleware, (req, res) => {
 
     res.write(`data: {"status": "connected"}\n\n`);
 
-    whatsappService.on('message', (apiKey, message) => {
+    const listener = (apiKey: string, message: any) => {
         if (apiKey !== req.apiKey) {
             return;
         }
         res.write(`event:message\ndata: ${JSON.stringify(message)}\n\n`);
-    });
+    }
+
+    whatsappService.on('message', listener);
 
     req.on('close', () => {
-        console.log('Client disconnected');
+        logger.info('Client disconnected');
+        whatsappService.off('message', listener);
         res.end();
     })
 });
@@ -63,20 +67,13 @@ router.get('/stream', authMiddleware, (req, res) => {
  *       400:
  *         description: Phone number required
  */
-router.post('/send/typing', authMiddleware, async (req, res) => {
+router.post('/send/typing', authMiddleware, validate([rules.phoneNumber()]), async (req, res) => {
     const apiKey = req.apiKey;
-    const { phoneNumber: phoneNum } = req.body;
+    const { phoneNumber } = req.body;
     if(!apiKey){
         return res.status(401).json({status: "error", message: "Unauthorized"});
     }
 
-    if (!phoneNum) {
-        return res.status(400).json({ status: "error", message: "Phone number is required" });
-    }
-    const phoneNumber = normalizePhoneNumber(phoneNum);
-    if(!phoneNumber){
-        return res.status(400).json({ status: "error", message: "Invalid phone number" });
-    }
     const success = await whatsappService.sendTyping(apiKey, phoneNumber);
 
     if(!success){
@@ -110,18 +107,11 @@ router.post('/send/typing', authMiddleware, async (req, res) => {
  *       400:
  *         description: Phone number and message required
  */
-router.post('/send/text', authMiddleware, async (req, res) => {
+router.post('/send/text', authMiddleware, validate([rules.phoneNumber(), rules.message]), async (req, res) => {
     const apiKey = req.apiKey;
-    const { phoneNumber: phoneNum, message } = req.body;
+    const { phoneNumber, message } = req.body;
     if(!apiKey){
         return res.status(401).json({status: "error", message: "Unauthorized"});
-    }
-    if (!phoneNum || !message) {
-        return res.status(400).json({ status: "error", message: "Phone number and message are required" });
-    }
-    const phoneNumber = normalizePhoneNumber(phoneNum);
-    if(!phoneNumber){
-        return res.status(400).json({ status: "error", message: "Invalid phone number" });
     }
     const success = await whatsappService.sendMessage(apiKey, phoneNumber, message);
     if(!success){
@@ -157,20 +147,13 @@ router.post('/send/text', authMiddleware, async (req, res) => {
  *       400:
  *         description: Phone number and file required
  */
-router.post('/send/file', authMiddleware, upload.single('file'), async (req, res) => {
+router.post('/send/file', authMiddleware, upload.single('file'), validate([rules.phoneNumber(), rules.file]), async (req, res) => {
     const apiKey = req.apiKey;
-    const { phoneNumber: phoneNum, caption } = req.body;
-    const file = req.file;
+    const { phoneNumber, caption } = req.body;
+    const file = req.file!;
     logger.info({ body: req.body, file: req.file?.originalname });
     if(!apiKey){
         return res.status(401).json({status: "error", message: "Unauthorized"});
-    }
-    if (!phoneNum || !file) {
-        return res.status(400).json({ status: "error", message: "Phone number and file are required" });
-    }
-    const phoneNumber = normalizePhoneNumber(phoneNum);
-    if(!phoneNumber){
-        return res.status(400).json({ status: "error", message: "Invalid phone number" });
     }
     const success = await whatsappService.sendMediaFile(apiKey, phoneNumber, file, caption);
     if(!success){

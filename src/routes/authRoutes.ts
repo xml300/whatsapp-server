@@ -3,14 +3,13 @@ import { createHash } from "crypto";
 import { Users } from "../lib/dataStore.js";
 import { whatsappService } from "../lib/whatsappService.js";
 import authMiddleware from "../middleware/auth.js";
-import { normalizePhoneNumber } from "../utils/helpers.js";
 import { logger } from "../lib/logger.js";
+import validate from "../middleware/validate.js";
+import { rules } from "../utils/validators.js";
 
 const router = Router();
 
-
-
-router.post("/me", async (req, res) => {
+router.post("/me", validate([rules.phoneNumber()]), async (req, res) => {
     const {phoneNumber} = req.body;
     const user = await Users.getByPhoneNumber(phoneNumber);
     if(!user) {
@@ -19,7 +18,6 @@ router.post("/me", async (req, res) => {
             message: "User not found"
         });
     }
-    console.log(user);
     res.json({
         status: "success",
         message: "User found",
@@ -46,15 +44,8 @@ router.post("/me", async (req, res) => {
  *       200:
  *         description: User registered successfully
  */
-router.post('/register', async (req, res) => {
-    const { phoneNumber: phoneNum } = req.body;
-    if (!phoneNum) {
-        return res.json({ status: "error", message: "Phone number is required" })
-    }
-    const phoneNumber = normalizePhoneNumber(phoneNum);
-    if (!phoneNumber) {
-        return res.json({ status: "error", message: "Invalid phone number" })
-    }
+router.post('/register', validate([rules.phoneNumber()]), async (req, res) => {
+    const { phoneNumber } = req.body;
 
     try {
         const userId = createHash('sha256').update(phoneNumber).digest('hex');
