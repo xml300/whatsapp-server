@@ -1,19 +1,19 @@
 import { Router } from "express";
 import { createHash } from "crypto";
-import { Users } from "../data/models/users.js";
-import { whatsappService } from "../lib/whatsappService.js";
-import authMiddleware from "../middleware/auth.js";
-import { logger } from "../lib/logger.js";
-import validate from "../middleware/validate.js";
-import { rules } from "../utils/validators.js";
-import { sendSuccess, sendError } from "../utils/helpers.js";
+import { Users } from "../../data/models/users.js";
+import { whatsappService } from "../../lib/whatsapp.js";
+import authMiddleware from "../../middleware/auth.js";
+import { logger } from "../../lib/logger.js";
+import validate from "../../middleware/validate.js";
+import { rules } from "../../utils/validators.js";
+import { sendSuccess, sendError } from "../../utils/request.js";
 
 const router = Router();
 
 router.post("/me", validate([rules.phoneNumber()]), async (req, res) => {
-    const {phoneNumber} = req.body;
+    const { phoneNumber } = req.body;
     const user = await Users.getByPhoneNumber(phoneNumber);
-    if(!user) {
+    if (!user) {
         return sendError(res, "User not found", 404);
     }
     return sendSuccess(res, {
@@ -56,7 +56,7 @@ router.post('/register', validate([rules.phoneNumber()]), async (req, res) => {
 });
 
 router.post("/api-key/regenerate", authMiddleware, async (req, res) => {
-    const apiKey = req.apiKey;
+    const apiKey = res.locals.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
         return sendError(res, "Invalid API Key", 401);
@@ -65,7 +65,7 @@ router.post("/api-key/regenerate", authMiddleware, async (req, res) => {
     if (!phoneNumber) {
         return sendError(res, "Invalid phone number", 400);
     }
-    
+
     try {
         const status = await whatsappService.disconnect(apiKey);
         const newApiKey = crypto.randomUUID();
@@ -89,7 +89,7 @@ router.post("/api-key/regenerate", authMiddleware, async (req, res) => {
  *         description: Connection status and QR code if available
  */
 router.post('/connect', authMiddleware, async (req, res) => {
-    const apiKey = req.apiKey;
+    const apiKey = res.locals.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
         return sendError(res, "Invalid API Key", 401);
@@ -110,7 +110,7 @@ router.post('/connect', authMiddleware, async (req, res) => {
  *         description: Whether the connection is ready
  */
 router.get('/connect/status', authMiddleware, async (req, res) => {
-    const apiKey = req.apiKey;
+    const apiKey = res.locals.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
         return sendError(res, "Invalid API Key", 401);
@@ -132,7 +132,7 @@ router.get('/connect/status', authMiddleware, async (req, res) => {
  *         description: QR code string
  */
 router.get('/connect/qr', authMiddleware, async (req, res) => {
-    const apiKey = req.apiKey;
+    const apiKey = res.locals.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
         return sendError(res, "Invalid API Key", 401);
@@ -153,7 +153,7 @@ router.get('/connect/qr', authMiddleware, async (req, res) => {
  *         description: Pairing code string
  */
 router.get('/connect/pairing-code', authMiddleware, async (req, res) => {
-    const apiKey = req.apiKey;
+    const apiKey = res.locals.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
         return sendError(res, "Invalid API Key", 401);
@@ -163,7 +163,7 @@ router.get('/connect/pairing-code', authMiddleware, async (req, res) => {
 });
 
 router.post('/disconnect', authMiddleware, async (req, res) => {
-    const apiKey = req.apiKey;
+    const apiKey = res.locals.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
         return sendError(res, "Invalid API Key", 401);

@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { logger } from "../lib/logger.js";
-import { sendError } from "../utils/helpers.js";
+import { sendError } from "../utils/request.js";
 
 export default async function errorMiddleware(err: Error, req: Request, res: Response, next: NextFunction){
     logger.error(err);

@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { Users } from "../data/models/users.js";
-import { sendError } from "../utils/helpers.js";
+import { sendError } from "../utils/request.js";
 
 export default async function authMiddleware(req: Request, res: Response, next: NextFunction) {
     const apiKey = req.headers["x-api-key"] as string;
@@ -14,6 +14,6 @@ export default async function authMiddleware(req: Request, res: Response, next: 
         return sendError(res, "Invalid API Key", 401);
     }
 
-    req.apiKey = apiKey;
+    res.locals.apiKey = apiKey;
     return next();
 }

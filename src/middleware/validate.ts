@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import type { ValidationRule } from "../utils/validators.js";
-import { sendError } from "../utils/helpers.js";
+import { sendError } from "../utils/request.js";
 
 async function validateBody(req: any, rule: ValidationRule): Promise<[boolean, Record<string, string>[] | null]> {
     let value: any;

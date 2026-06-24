@@ -1,4 +1,4 @@
-import { normalizePhoneNumber } from "./helpers.js";
+import { normalizePhoneNumber } from "./format.js";
 
 export type ValidationRule = {
     field: string;
