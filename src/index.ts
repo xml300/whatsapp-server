@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import whatsappRoutes from "./routes/v1/whatsappRoutes.js";
 import authRoutes from "./routes/v1/authRoutes.js";
+import v1Routes from "./routes/v1/_indexRoutes.js";
 import { loggingMiddleware } from "./middleware/logging.js";
 import { logger } from "./lib/logger.js";
 import { Log } from "./data/db.js";
@@ -36,29 +37,7 @@ app.get('/api/health', (req, res) => {
     sendSuccess(res, { ok: true });
 });
 
-app.get('/api/logs', async (req, res) => {
-    const { page, limit } = req.query;
-    const numLimit = limit ? parseInt(limit as string) : 100;
-    const numPage = page ? parseInt(page as string) : 1;
-    const offset = (numPage - 1) * numLimit;
-
-    const logs = await Log.find({}, { __v: 0, _id: 0 })
-        .sort({ timestamp: -1 })
-        .skip(offset)
-        .limit(numLimit);
-    const logCount = await Log.countDocuments();
-    const totalPages = Math.ceil(logCount / numLimit);
-    sendSuccess(res, logs, {
-        totalPages,
-        currentPage: numPage,
-        logsPerPage: numLimit,
-        totalLogs: logCount
-    });
-});
-
-
-app.use('/api/auth', authRoutes);
-app.use('/api', whatsappRoutes);
+app.use('/api/v1', v1Routes);
 
 app.use(errorMiddleware);
 

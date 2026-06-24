@@ -7,7 +7,7 @@ import whatsappRoutes from "./whatsappRoutes.js";
 
 const router = express.Router();
 
-router.get('/api/logs', async (req, res) => {
+router.get('/logs', async (req, res) => {
     const { page, limit } = req.query;
     const numLimit = limit ? parseInt(limit as string) : 100;
     const numPage = page ? parseInt(page as string) : 1;
@@ -28,8 +28,8 @@ router.get('/api/logs', async (req, res) => {
 });
 
 
-router.use('/api/auth', authRoutes);
-router.use('/api', whatsappRoutes);
+router.use('/auth', authRoutes);
+router.use('/', whatsappRoutes);
 
 
 
