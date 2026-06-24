@@ -5,6 +5,8 @@ import authRoutes from "./routes/authRoutes.js";
 import { loggingMiddleware } from "./middleware/logging.js";
 import { logger } from "./lib/logger.js";
 import { Log } from "./data/db.js";
+import errorMiddleware from "./middleware/error.js";
+import { sendSuccess } from "./utils/helpers.js";
 
 const app = express();
 const PORT = 3000;
@@ -31,7 +33,7 @@ app.use(cors({
  */
 app.get('/api/health', (req, res) => {
     logger.info("Health route hit!");
-    res.json({ ok: true });
+    sendSuccess(res, { ok: true });
 });
 
 app.get('/api/logs', async (req, res) => {
@@ -46,12 +48,11 @@ app.get('/api/logs', async (req, res) => {
         .limit(numLimit);
     const logCount = await Log.countDocuments();
     const totalPages = Math.ceil(logCount / numLimit);
-    res.json({
+    sendSuccess(res, logs, {
         totalPages,
         currentPage: numPage,
         logsPerPage: numLimit,
-        totalLogs: logCount,
-        logs
+        totalLogs: logCount
     });
 });
 
@@ -59,6 +60,7 @@ app.get('/api/logs', async (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api', whatsappRoutes);
 
+app.use(errorMiddleware);
 
 app.listen(PORT, "0.0.0.0", async () => {
     logger.info("Server is running on port 3000");

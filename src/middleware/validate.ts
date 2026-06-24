@@ -1,41 +1,54 @@
 import type { NextFunction, Request, Response } from "express";
 import type { ValidationRule } from "../utils/validators.js";
+import { sendError } from "../utils/helpers.js";
 
-export default function validate(rules: ValidationRule[]) {
-    return (req: Request, res: Response, next: NextFunction): void | Response => {
-        for (const rule of rules) {
-            let value: any;
-            if (rule.location === "file") {
-                value = req.file;
-            } else {
-                const container = req[rule.location] as Record<string, any> | undefined;
-                value = container?.[rule.field];
+async function validateBody(req: any, rule: ValidationRule): Promise<[boolean, Record<string, string>[] | null]> {
+    let value: any;
+    const errors: Record<string, string>[] = [];
+    if (rule.location === "file") {
+        value = req.file;
+    } else {
+        const container = req[rule.location] as Record<string, any> | undefined;
+        value = container?.[rule.field];
+    }
+
+    if (rule.required && (value === undefined || value === null || value === "")) {
+        errors.push({ field: rule.field, message: rule.message || `${rule.field} is required` });
+    }
+
+    if (value !== undefined && value !== null && value !== "") {
+        if (rule.validate) {
+            const result = rule.validate(value);
+            if (result === false || result === null) {
+                errors.push({ field: rule.field, message: rule.message || `Invalid ${rule.field}` });
             }
-
-            if (rule.required && (value === undefined || value === null || value === "")) {
-                return res.status(400).json({
-                    status: "error",
-                    message: rule.message || `${rule.field} is required`
-                });
-            }
-
-            if (value !== undefined && value !== null && value !== "") {
-                if (rule.validate) {
-                    const result = rule.validate(value);
-                    if (result === false || result === null) {
-                        return res.status(400).json({
-                            status: "error",
-                            message: rule.message || `Invalid ${rule.field}`
-                        });
-                    }
-                    if (typeof result === "string") {
-                        if (rule.location !== "file") {
-                            const container = req[rule.location] as Record<string, any>;
-                            container[rule.field] = result;
-                        }
-                    }
+            if (typeof result === "string") {
+                if (rule.location !== "file") {
+                    const container = req[rule.location] as Record<string, any>;
+                    container[rule.field] = result;
                 }
             }
+        }
+    }
+
+    if (errors.length > 0) {
+        return [false, errors];
+    }
+
+    return [true, null];
+}
+
+export default function validate(rules: ValidationRule[]) {
+    return async (req: Request, res: Response, next: NextFunction) => {
+        const validationErrors: Record<string, string>[] = [];
+        for (const rule of rules) {
+            const [success, errors] = await validateBody(req, rule);
+            if (!success && errors) {
+                validationErrors.push(...errors);
+            }
+        }
+        if (validationErrors.length > 0) {
+            return sendError(res, "Validation failed", 412, validationErrors);
         }
         next();
     };

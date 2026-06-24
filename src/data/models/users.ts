@@ -1,4 +1,4 @@
-import { User } from "../data/db.js";
+import { User } from "../../data/db.js";
 
 export const Users = {
     create: async (row: Record<string, any>) => {
@@ -26,4 +26,4 @@ export const Users = {
         const user = await User.findOneAndUpdate({ phoneNumber }, update, { new: true });
         return user;
     },
-}
+};

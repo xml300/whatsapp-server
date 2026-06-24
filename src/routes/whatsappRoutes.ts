@@ -5,6 +5,7 @@ import authMiddleware from "../middleware/auth.js";
 import { logger } from "../lib/logger.js";
 import validate from "../middleware/validate.js";
 import { rules } from "../utils/validators.js";
+import { sendSuccess, sendError } from "../utils/helpers.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
@@ -71,16 +72,16 @@ router.post('/send/typing', authMiddleware, validate([rules.phoneNumber()]), asy
     const apiKey = req.apiKey;
     const { phoneNumber } = req.body;
     if(!apiKey){
-        return res.status(401).json({status: "error", message: "Unauthorized"});
+        return sendError(res, "Unauthorized", 401);
     }
 
     const success = await whatsappService.sendTyping(apiKey, phoneNumber);
 
     if(!success){
-        return res.status(400).json({ status: "error", message: "Failed to send typing indicator" });
+        return sendError(res, "Failed to send typing indicator", 400);
     }
 
-    res.json({ status: "success", message: "Typing sent successfully" });
+    return sendSuccess(res, { message: "Typing sent successfully" });
 });
 
 /**
@@ -111,13 +112,13 @@ router.post('/send/text', authMiddleware, validate([rules.phoneNumber(), rules.m
     const apiKey = req.apiKey;
     const { phoneNumber, message } = req.body;
     if(!apiKey){
-        return res.status(401).json({status: "error", message: "Unauthorized"});
+        return sendError(res, "Unauthorized", 401);
     }
     const success = await whatsappService.sendMessage(apiKey, phoneNumber, message);
     if(!success){
-        return res.status(400).json({ status: "error", message: "Failed to send message" });
+        return sendError(res, "Failed to send message", 400);
     }
-    res.json({ status: "success", message: "Message sent successfully" });
+    return sendSuccess(res, { message: "Message sent successfully" });
 });
 
 /**
@@ -153,13 +154,13 @@ router.post('/send/file', authMiddleware, upload.single('file'), validate([rules
     const file = req.file!;
     logger.info({ body: req.body, file: req.file?.originalname });
     if(!apiKey){
-        return res.status(401).json({status: "error", message: "Unauthorized"});
+        return sendError(res, "Unauthorized", 401);
     }
     const success = await whatsappService.sendMediaFile(apiKey, phoneNumber, file, caption);
     if(!success){
-        return res.status(400).json({ status: "error", message: "Failed to send file" });
+        return sendError(res, "Failed to send file", 400);
     }
-    res.json({ status: "success", message: "File sent successfully" });
+    return sendSuccess(res, { message: "File sent successfully" });
 });
 
 export default router;

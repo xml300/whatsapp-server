@@ -9,7 +9,7 @@ import { formatJid } from "../utils/helpers.js";
 import { logger as _logger, nameLogger } from "./logger.js";
 import { useNoSQLAuthState } from "./auth.js";
 import { Credential, KeyStore } from "../data/db.js";
-import { Users } from "./dataStore.js";
+import { Users } from "../data/models/users.js";
 
 const logger = nameLogger(_logger, "WhatsappService");
 

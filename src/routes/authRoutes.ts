@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { createHash } from "crypto";
-import { Users } from "../lib/dataStore.js";
+import { Users } from "../data/models/users.js";
 import { whatsappService } from "../lib/whatsappService.js";
 import authMiddleware from "../middleware/auth.js";
 import { logger } from "../lib/logger.js";
 import validate from "../middleware/validate.js";
 import { rules } from "../utils/validators.js";
+import { sendSuccess, sendError } from "../utils/helpers.js";
 
 const router = Router();
 
@@ -13,13 +14,9 @@ router.post("/me", validate([rules.phoneNumber()]), async (req, res) => {
     const {phoneNumber} = req.body;
     const user = await Users.getByPhoneNumber(phoneNumber);
     if(!user) {
-        return res.status(400).json({
-            status: "error",
-            message: "User not found"
-        });
+        return sendError(res, "User not found", 404);
     }
-    res.json({
-        status: "success",
+    return sendSuccess(res, {
         message: "User found",
         apiKey: user.apiKey
     });
@@ -51,10 +48,10 @@ router.post('/register', validate([rules.phoneNumber()]), async (req, res) => {
         const userId = createHash('sha256').update(phoneNumber).digest('hex');
         const apiKey = crypto.randomUUID();
         const user = await Users.create({ _id: userId, apiKey, phoneNumber });
-        return res.json({ status: "success", apiKey });
+        return sendSuccess(res, { apiKey });
     } catch (error) {
         logger.error("Failed to create user " + error)
-        return res.json({ status: "error", message: "Failed to create user" })
+        return sendError(res, "Failed to create user", 500);
     }
 });
 
@@ -62,21 +59,21 @@ router.post("/api-key/regenerate", authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
-        return res.json({ status: "error", message: "Invalid API Key" })
+        return sendError(res, "Invalid API Key", 401);
     }
     const phoneNumber = user.phoneNumber;
     if (!phoneNumber) {
-        return res.json({ status: "error", message: "Invalid phone number" })
+        return sendError(res, "Invalid phone number", 400);
     }
     
     try {
         const status = await whatsappService.disconnect(apiKey);
         const newApiKey = crypto.randomUUID();
         await Users.update(phoneNumber, { apiKey: newApiKey });
-        return res.json({ status: "success", apiKey: newApiKey, serviceStatus: status });
+        return sendSuccess(res, { apiKey: newApiKey, serviceStatus: status });
     } catch (error) {
         logger.error("Failed to regenerate API key " + error)
-        return res.json({ status: "error", message: "Failed to regenerate API key" })
+        return sendError(res, "Failed to regenerate API key", 500);
     }
 });
 
@@ -95,10 +92,10 @@ router.post('/connect', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
-        return res.json({ status: "error", message: "Invalid API Key" })
+        return sendError(res, "Invalid API Key", 401);
     }
     const status = await whatsappService.connect(apiKey, user.phoneNumber);
-    return res.json({ status: "success", serviceStatus: status });
+    return sendSuccess(res, { serviceStatus: status });
 });
 
 /**
@@ -116,11 +113,11 @@ router.get('/connect/status', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
-        return res.json({ status: "error", message: "Invalid API Key" })
+        return sendError(res, "Invalid API Key", 401);
     }
     const isConnected = whatsappService.isConnected(apiKey);
     const isPairingReady = whatsappService.isConnectionReady(apiKey);
-    return res.json({ status: "success", isConnected, isPairingReady });
+    return sendSuccess(res, { isConnected, isPairingReady });
 });
 
 /**
@@ -138,10 +135,10 @@ router.get('/connect/qr', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
-        return res.json({ status: "error", message: "Invalid API Key" })
+        return sendError(res, "Invalid API Key", 401);
     }
     const qr = whatsappService.getQrCode(apiKey);
-    return res.json({ status: "success", qr });
+    return sendSuccess(res, { qr });
 });
 
 /**
@@ -159,20 +156,20 @@ router.get('/connect/pairing-code', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
-        return res.json({ status: "error", message: "Invalid API Key" })
+        return sendError(res, "Invalid API Key", 401);
     }
     const pairingCode = await whatsappService.getPairingCode(apiKey, user.phoneNumber);
-    return res.json({ status: "success", pairingCode });
+    return sendSuccess(res, { pairingCode });
 });
 
 router.post('/disconnect', authMiddleware, async (req, res) => {
     const apiKey = req.apiKey;
     const user = await Users.get(apiKey);
     if (!user || !user.phoneNumber) {
-        return res.json({ status: "error", message: "Invalid API Key" });
+        return sendError(res, "Invalid API Key", 401);
     }
     const status = await whatsappService.disconnect(apiKey);
-    return res.json({ status: "success", serviceStatus: status ? "disconnected" : "failed to disconnect" });
+    return sendSuccess(res, { serviceStatus: status ? "disconnected" : "failed to disconnect" });
 });
 
 
