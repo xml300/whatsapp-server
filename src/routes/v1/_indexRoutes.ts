@@ -1,5 +1,4 @@
 import express from "express";
-import { sendSuccess } from "../../utils/request.js";
 import { Log } from "../../data/db.js";
 
 import authRoutes from "./authRoutes.js";
@@ -19,11 +18,13 @@ router.get('/logs', async (req, res) => {
         .limit(numLimit);
     const logCount = await Log.countDocuments();
     const totalPages = Math.ceil(logCount / numLimit);
-    sendSuccess(res, logs, {
+    return res.json({
+        status: "success",
         totalPages,
         currentPage: numPage,
         logsPerPage: numLimit,
-        totalLogs: logCount
+        totalLogs: logCount,
+        logs
     });
 });
 

@@ -5,7 +5,6 @@ import authMiddleware from "../../middleware/auth.js";
 import { logger } from "../../lib/logger.js";
 import validate from "../../middleware/validate.js";
 import { rules } from "../../utils/validators.js";
-import { sendSuccess, sendError } from "../../utils/request.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
@@ -74,10 +73,10 @@ router.post('/send/typing', authMiddleware, validate([rules.phoneNumber()]), asy
     const success = await whatsappService.sendTyping(apiKey, phoneNumber);
 
     if (!success) {
-        return sendError(res, "Failed to send typing indicator", 400);
+        return res.status(400).json({ status: "error", message: "Failed to send typing indicator" });
     }
 
-    return sendSuccess(res, { message: "Typing sent successfully" });
+    return res.json({ status: "success", message: "Typing sent successfully" });
 });
 
 /**
@@ -109,9 +108,9 @@ router.post('/send/text', authMiddleware, validate([rules.phoneNumber(), rules.m
     const { phoneNumber, message } = req.body;
     const success = await whatsappService.sendMessage(apiKey, phoneNumber, message);
     if (!success) {
-        return sendError(res, "Failed to send message", 400);
+        return res.status(400).json({ status: "error", message: "Failed to send message" });
     }
-    return sendSuccess(res, { message: "Message sent successfully" });
+    return res.json({ status: "success", message: "Message sent successfully" });
 });
 
 /**
@@ -148,9 +147,9 @@ router.post('/send/file', authMiddleware, upload.single('file'), validate([rules
     logger.info({ body: req.body, file: req.file?.originalname });
     const success = await whatsappService.sendMediaFile(apiKey, phoneNumber, file, caption);
     if (!success) {
-        return sendError(res, "Failed to send file", 400);
+        return res.status(400).json({ status: "error", message: "Failed to send file" });
     }
-    return sendSuccess(res, { message: "File sent successfully" });
+    return res.json({ status: "success", message: "File sent successfully" });
 });
 
 export default router;

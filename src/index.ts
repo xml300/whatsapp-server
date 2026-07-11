@@ -4,7 +4,6 @@ import v1Routes from "./routes/v1/_indexRoutes.js";
 import { loggingMiddleware } from "./middleware/logging.js";
 import { logger } from "./lib/logger.js"; 
 import errorMiddleware from "./middleware/error.js";
-import { sendSuccess } from "./utils/request.js";
 
 const app = express();
 const PORT = 3000;
@@ -31,7 +30,7 @@ app.use(cors({
  */
 app.get('/api/health', (req, res) => {
     logger.info("Health route hit!");
-    sendSuccess(res, { ok: true });
+    res.json({ ok: true });
 });
 
 app.use('/api/v1', v1Routes);

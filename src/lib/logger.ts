@@ -1,6 +1,8 @@
 import { Log } from "../data/db.js";
 
-async function log(message: string, level: string, source?: string) {
+type LogLevel = "INFO" | "DEBUG" | "ERROR" | "WARN";
+
+async function log(message: string, level: LogLevel, source?: string) {
     const id = crypto.randomUUID();
     await Log.insertOne({
         id: id,

@@ -1,17 +1,22 @@
 import type { NextFunction, Request, Response } from "express";
 import { Users } from "../data/models/users.js";
-import { sendError } from "../utils/request.js";
 
 export default async function authMiddleware(req: Request, res: Response, next: NextFunction) {
     const apiKey = req.headers["x-api-key"] as string;
 
     if(!apiKey){
-        return sendError(res, "API Key is required", 401);
+        return res.status(401).json({
+            status: "error",
+            message: "API Key is required"
+        });
     }
 
     const user = await Users.get(apiKey);
     if(!user || !user.phoneNumber){
-        return sendError(res, "Invalid API Key", 401);
+        return res.status(401).json({
+            status: "error",
+            message: "Invalid API Key"
+        });
     }
 
     res.locals.apiKey = apiKey;

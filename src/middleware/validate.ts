@@ -1,6 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
 import type { ValidationRule } from "../utils/validators.js";
-import { sendError } from "../utils/request.js";
 
 async function validateBody(req: any, rule: ValidationRule): Promise<[boolean, Record<string, string>[] | null]> {
     let value: any;
@@ -48,7 +47,11 @@ export default function validate(rules: ValidationRule[]) {
             }
         }
         if (validationErrors.length > 0) {
-            return sendError(res, "Validation failed", 412, validationErrors);
+            return res.status(412).json({
+                status: "error",
+                message: "Validation failed",
+                details: validationErrors
+            });
         }
         next();
     };
