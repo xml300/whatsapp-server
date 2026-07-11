@@ -1,4 +1,4 @@
-import type { WAMessage } from "baileys";
+import { makeWASocket, type WAMessage } from "baileys";
 
 export type WhatsappEvents = {
     connected: (apiKey: string) => void;
@@ -10,4 +10,11 @@ export type WhatsappEvents = {
 export enum ConnectionStatus {
     CONNECTED = "connected",
     DISCONNECTED = "disconnected",
+}
+
+export interface ClientStateInfo {
+    socket: ReturnType<typeof makeWASocket> | null;
+    status: ConnectionStatus;
+    isPairingReady: boolean;
+    qr: string | null;
 }

@@ -10,18 +10,6 @@ import { sendSuccess, sendError } from "../../utils/request.js";
 
 const router = Router();
 
-router.post("/me", validate([rules.phoneNumber()]), async (req, res) => {
-    const { phoneNumber } = req.body;
-    const user = await Users.getByPhoneNumber(phoneNumber);
-    if (!user) {
-        return sendError(res, "User not found", 404);
-    }
-    return sendSuccess(res, {
-        message: "User found",
-        apiKey: user.apiKey
-    });
-})
-
 /**
  * @openapi
  * /api/auth/register:
@@ -42,13 +30,12 @@ router.post("/me", validate([rules.phoneNumber()]), async (req, res) => {
  *         description: User registered successfully
  */
 router.post('/register', validate([rules.phoneNumber()]), async (req, res) => {
-    const { phoneNumber } = req.body;
+    const { username, password, phoneNumber } = req.body;
 
     try {
         const userId = createHash('sha256').update(phoneNumber).digest('hex');
-        const apiKey = crypto.randomUUID();
-        const user = await Users.create({ _id: userId, apiKey, phoneNumber });
-        return sendSuccess(res, { apiKey });
+        const user = await Users.create({ _id: userId, phoneNumber, username, password });
+        return sendSuccess(res, { user });
     } catch (error) {
         logger.error("Failed to create user " + error)
         return sendError(res, "Failed to create user", 500);

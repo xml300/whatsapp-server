@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import "dotenv/config";
 import { logger } from "../lib/logger.js";
+import type { IApiKey, IUser } from "../types/models.js";
 
 const DATABASE_URL = process.env.MONGODB_URL;
 
@@ -12,13 +13,33 @@ mongoose.connect(DATABASE_URL)
 .then(() => logger.info("Connected to MongoDB"))
 .catch((err) => logger.error("Failed to connect to MongoDB " + err));
 
-const userSchema = new mongoose.Schema({
+const userSchema = new mongoose.Schema<IUser>({
     _id: {
         type: String,
         required: true
     },
-    apiKey: String,
+    username: {
+        type: String,
+        required: true
+    },
+    password: {
+        type: String,
+        required: true
+    },
     phoneNumber: String,
+    createdAt: {
+        type: Date,
+        default: Date.now
+    },
+    updatedAt: {
+        type: Date,
+        default: Date.now
+    }
+});
+
+const apiKeySchema = new mongoose.Schema<IApiKey>({
+    userId: String,
+    apiKey: String,
     createdAt: {
         type: Date,
         default: Date.now
@@ -51,7 +72,8 @@ const logSchema = new mongoose.Schema({
 });
 
 
-export const User = mongoose.model("User", userSchema);
+export const User = mongoose.model<IUser>("User", userSchema);
+export const ApiKey = mongoose.model<IApiKey>("ApiKey", apiKeySchema);
 export const Credential = mongoose.model("Credential", credentialSchema);
 export const KeyStore = mongoose.model("KeyStore", keyStoreSchema);
 export const Log = mongoose.model("Log", logSchema);

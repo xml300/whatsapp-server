@@ -1,19 +1,20 @@
 import { User } from "../../data/db.js";
+import type { IUser } from "../../types/models.js";
 
 export const Users = {
-    create: async (row: Record<string, any>) => {
-        const existingUser = await User.findOne({ phoneNumber: row.phoneNumber });
+    create: async (data: Omit<IUser, "createdAt" | "updatedAt">) => {
+        const existingUser = await User.findOne({ phoneNumber: data.phoneNumber });
         if (existingUser) {
             throw new Error("User already exists");
         }
 
-        const user = new User(row);
+        const user = new User(data);
         await user.save();
         return user;
     },
 
-    get: async (apiKey: string) => {
-        const user = await User.findOne({ apiKey });
+    getByUsername: async (username: string) => {
+        const user = await User.findOne({ username });
         return user;
     },
 

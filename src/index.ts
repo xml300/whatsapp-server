@@ -1,11 +1,8 @@
 import express from "express";
-import cors from "cors";
-import whatsappRoutes from "./routes/v1/whatsappRoutes.js";
-import authRoutes from "./routes/v1/authRoutes.js";
+import cors from "cors"; 
 import v1Routes from "./routes/v1/_indexRoutes.js";
 import { loggingMiddleware } from "./middleware/logging.js";
-import { logger } from "./lib/logger.js";
-import { Log } from "./data/db.js";
+import { logger } from "./lib/logger.js"; 
 import errorMiddleware from "./middleware/error.js";
 import { sendSuccess } from "./utils/request.js";
 
