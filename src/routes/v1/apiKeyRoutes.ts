@@ -2,7 +2,7 @@ import { Router } from "express";
 import { Users } from "../../data/models/users.js";
 import { whatsappService } from "../../lib/whatsapp.js";
 import { logger } from "../../lib/logger.js";
-import userAuthMiddleware from "../../lib/user-auth.js";
+import userAuthMiddleware from "../../middleware/user-auth.js";
 
 const router = Router();
 router.use(userAuthMiddleware);
