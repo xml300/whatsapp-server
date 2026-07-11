@@ -7,6 +7,7 @@ import errorMiddleware from "./middleware/error.js";
 import cookieParser from "cookie-parser";
 import { whatsappService } from "./lib/whatsapp.js";
 import { handleShutdown, handleStartup } from "./utils/server.js";
+import { serverUnavailable } from "@hapi/boom";
 
 const app = express();
 const PORT = 3000;
@@ -38,7 +39,7 @@ app.use('/api/v1', v1Routes);
 
 app.use(errorMiddleware);
 
-app.listen(PORT, "0.0.0.0", async () => {
+const server = app.listen(PORT, "0.0.0.0", async () => {
     logger.info("Server is running on port 3000");
     await handleStartup();
 });
@@ -49,6 +50,6 @@ for(const signal of signals) {
     process.on(signal, async () => {
         logger.info('Handling shutdown signal:', signal);
         await handleShutdown();
-        process.exit(0);
+        server.close(() => process.exit(0));
     });
 }     

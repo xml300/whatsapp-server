@@ -1,3 +1,4 @@
+import bcrypt from "bcrypt";
 import { createHash } from "crypto";
 
 import { User } from "../../data/db.js";
@@ -12,7 +13,9 @@ export const Users = {
 
         const user = new User({
             _id: createHash('sha256').update(data.username).digest('hex'),
-            ...data
+            username: data.username,
+            password: await bcrypt.hash(data.password, 12),
+            phoneNumber: data.phoneNumber
         });
         await user.save();
         return user;

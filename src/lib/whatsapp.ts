@@ -226,10 +226,18 @@ class WhatsappService {
             logger.info("No socket found for API key");
             return false;
         }
-        socket.end(undefined);
+        await socket.logout();
         this.sockets.delete(apiKey);
         const status = await this.clearSession(apiKey);
         return status;
+    }
+
+     async clearAll() {
+        for(const [apiKey, stateInfo] of this.sockets.entries()) {
+            stateInfo.socket?.end(undefined);
+            this.sockets.delete(apiKey);
+        }
+        return true;
     }
 
     async sendTyping(apiKey: string, phoneNumber: string) {
@@ -277,7 +285,7 @@ class WhatsappService {
         } 
 
         const messageOptions: any = {
-            mimeType: mediaType, 
+            mimetype: mediaType, 
             caption: caption || ""
         }
 
@@ -304,7 +312,7 @@ class WhatsappService {
 
         const type = getMimeTypeGroup(file.mimetype);
         const messageOptions: any = {
-            mimeType: file.mimetype,
+            mimetype: file.mimetype,
             fileName: file.originalname,
             caption: caption || ""
         }

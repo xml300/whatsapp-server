@@ -1,6 +1,9 @@
 import { Router } from "express";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
 import { Users } from "../../data/models/users.js";
 import validate from "../../middleware/validate.js";
+import { Config } from "../../lib/config.js";
 
 const router = Router();
 
@@ -24,7 +27,7 @@ router.post('/login', validate({
         });
     }
 
-    const isPasswordValid = user.password === password;
+    const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
         return res.status(401).json({
             success: false,
@@ -34,10 +37,13 @@ router.post('/login', validate({
             }
         });
     }
-    return res.cookie('auth_token', { userId: user._id, phoneNumber: user.phoneNumber }, {
+    const token = jwt.sign({ userId: user._id, phoneNumber: user.phoneNumber }, Config.JWT_SECRET, {
+        expiresIn: "1h"
+    });
+    return res.cookie('auth_token', token, {
         httpOnly: true,
         sameSite: 'strict',
-        maxAge: 60 * 60 * 24 * 7
+        maxAge: 1000 * 60 * 60
     }).json({
         success: true,
         data: { user }
@@ -56,10 +62,13 @@ router.post('/register', validate({
 }), async (req, res) => {
     const { username, password, phoneNumber } = req.body;
     const user = await Users.create({ phoneNumber, username, password });
-    return res.cookie('auth_token', { userId: user._id, phoneNumber: user.phoneNumber }, {
+    const token = jwt.sign({ userId: user._id, phoneNumber: user.phoneNumber }, Config.JWT_SECRET, {
+        expiresIn: "1h"
+    });
+    return res.cookie('auth_token', token, {
         httpOnly: true,
         sameSite: 'strict',
-        maxAge: 60 * 60 * 24 * 7
+        maxAge: 1000 * 60 * 60
     }).json({
         success: true,
         data: { user }

@@ -21,7 +21,7 @@ export const ruleRegistry: Record<string, ValidationRule> = {
         message: "Invalid or missing phone number"
     },
     message: {
-        validate: (val) => typeof val === "string" && val.trim().length > 0,
+        validate: (val) => typeof val === "string" && val.trim().length > 0 && val.trim().length <= 65530,
         message: "Message content is required"
     },
     file: {
