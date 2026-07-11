@@ -5,6 +5,7 @@ export type WhatsappEvents = {
     disconnected: (apiKey: string, reason: string) => void;
     qr: (apiKey: string, dataUrl: string) => void;
     message: (apiKey: string, data: WAMessage) => void;
+    "message.update": (apiKey: string, update: any) => void;
 };
 
 export enum ConnectionStatus {
@@ -14,6 +15,7 @@ export enum ConnectionStatus {
 
 export interface ClientStateInfo {
     socket: ReturnType<typeof makeWASocket> | null;
+    phoneNumber: string;
     status: ConnectionStatus;
     isPairingReady: boolean;
     qr: string | null;

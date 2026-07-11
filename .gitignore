@@ -1,8 +1,10 @@
 auth/
 auth_info_folder/
 node_modules/
+data/
 
 .env
 *.log
 *.png
 dist/
+*.l 

@@ -1,5 +1,5 @@
 
-import makeWASocket, { DisconnectReason, isLidUser, isPnUser } from "baileys";
+import makeWASocket, { DisconnectReason, isLidUser, isPnUser, type WAMessageKey } from "baileys";
 import { Boom } from "@hapi/boom";
 import { EventEmitter } from "events";
 import pino from "pino";
@@ -10,8 +10,23 @@ import { useNoSQLAuthState } from "./auth.js";
 import { Credential, KeyStore } from "../data/db.js";
 import { Users } from "../data/models/users.js";
 import { ApiKeys } from "../data/models/api-keys.js";
+import { SocketAddress } from "net";
 
 const logger = nameLogger("WhatsappService");
+
+function getMimeTypeGroup(mimeType: string) {
+  if (!mimeType) {
+    return 'document';
+  }
+
+  const type = mimeType.toLowerCase().split(';')[0]?.trim();
+
+  if (type?.startsWith('image/')) return 'image';
+  if (type?.startsWith('video/')) return 'video';
+  if (type?.startsWith('audio/')) return 'audio';
+
+  return 'document';
+}
 
 
 class WhatsappService {
@@ -21,6 +36,19 @@ class WhatsappService {
     constructor() {
         this.sockets = new Map();
         this.emitter = new EventEmitter();
+    }
+
+    get activeSessions(){
+        const sessions = [];
+        for(const [key, value] of this.sockets.entries()){
+            sessions.push({
+                apiKey: key,
+                status: value.status,
+                isPairingReady: value.isPairingReady,
+                phoneNumber: value.phoneNumber
+            })
+        }
+        return sessions;
     }
 
     private async clearSession(apiKey: string) {
@@ -59,6 +87,7 @@ class WhatsappService {
 
     private registerConnectionHandler(stateInfo: ClientStateInfo, apiKey: string, phoneNumber: string) {
         const { socket } = stateInfo;
+        let retries = 0;
         socket?.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             logger.info("[131] " + JSON.stringify(update, null, 2))
@@ -70,9 +99,10 @@ class WhatsappService {
                 const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
                 stateInfo.status = ConnectionStatus.DISCONNECTED;
-                if (shouldReconnect) {
+                if (shouldReconnect && retries < 5) {
                     logger.info("Connection closed. Reconnecting...");
-                    setTimeout(() => this.connect(apiKey, phoneNumber), 5000);
+                    retries = retries + 1;
+                    setTimeout(() => this.connect(apiKey, phoneNumber), 5000 * retries);
                 } else {
                     logger.info("Connection closed. Not reconnecting...");
                 }
@@ -101,6 +131,16 @@ class WhatsappService {
         });
     }
 
+    private async messageUpdateHandler(stateInfo: ClientStateInfo, apiKey: string) {
+        const { socket } = stateInfo;
+
+        socket?.ev.on('message-receipt.update', (updates) => {
+            for(const update of updates) {
+                this.emit('message.update', apiKey, update);
+            }
+        });
+    }
+
     on<K extends keyof WhatsappEvents>(event: K, listener: WhatsappEvents[K]) {
         this.emitter.on(event, listener);
     }
@@ -111,6 +151,10 @@ class WhatsappService {
 
     emit<K extends keyof WhatsappEvents>(event: K, ...args: Parameters<WhatsappEvents[K]>) {
         this.emitter.emit(event, ...args);
+    }
+
+    getActiveSessions() {
+        return this.sockets.size;
     }
 
     isConnected(apiKey: string) {
@@ -162,6 +206,7 @@ class WhatsappService {
 
         const stateInfo: ClientStateInfo = {
             socket,
+            phoneNumber,
             status: ConnectionStatus.DISCONNECTED,
             isPairingReady: false,
             qr: null
@@ -170,6 +215,7 @@ class WhatsappService {
         this.registerConnectionHandler(stateInfo, apiKey, phoneNumber);
         socket.ev.on('creds.update', saveCreds);
         this.registerMessageHandler(stateInfo, apiKey);
+        this.messageUpdateHandler(stateInfo, apiKey);
         this.sockets.set(apiKey, stateInfo);
         return stateInfo.status;
     }
@@ -218,6 +264,32 @@ class WhatsappService {
         return message;
     }
 
+    async sendMediaMessage(apiKey: string, phoneNumber: string, mediaType: string, mediaUrl: string, caption?: string) {
+        const status = this.getStatus(apiKey);
+        if (status !== ConnectionStatus.CONNECTED) {
+            logger.info("WhatsApp is not connected");
+            return null;
+        }
+        const socket = this.getSocket(apiKey);
+        if(!socket) {
+            logger.info("No socket found for API key");
+            return null;
+        } 
+
+        const messageOptions: any = {
+            mimeType: mediaType, 
+            caption: caption || ""
+        }
+
+        if(mediaType === "image") messageOptions.image = {url: mediaUrl};
+        else if(mediaType === "video") messageOptions.video = {url: mediaUrl};
+        else if(mediaType === "audio") messageOptions.audio = {url: mediaUrl};
+        else messageOptions.document = {url: mediaUrl};
+
+        const message = await socket.sendMessage(formatJid(phoneNumber), messageOptions);
+        return message;
+    }
+
     async sendMediaFile(apiKey: string, phoneNumber: string, file: Express.Multer.File, caption?: string) {
         const status = this.getStatus(apiKey);
         if (status !== ConnectionStatus.CONNECTED) {
@@ -229,14 +301,51 @@ class WhatsappService {
             logger.info("No socket found for API key");
             return null;
         } 
-        const message = await socket.sendMessage(formatJid(phoneNumber), {
-            document: file.buffer,
-            mimetype: file.mimetype,
+
+        const type = getMimeTypeGroup(file.mimetype);
+        const messageOptions: any = {
+            mimeType: file.mimetype,
             fileName: file.originalname,
             caption: caption || ""
-        })
+        }
+
+        if(type === "image") messageOptions.image = file.buffer;
+        else if(type === "video") messageOptions.video = file.buffer;
+        else if(type === "audio") messageOptions.audio = file.buffer;
+        else messageOptions.document = file.buffer;
+
+        const message = await socket.sendMessage(formatJid(phoneNumber), messageOptions);
         return message;
     }
+
+     async sendVoiceNote(apiKey: string, phoneNumber: string, file: Express.Multer.File) {
+        const status = this.getStatus(apiKey);
+        if (status !== ConnectionStatus.CONNECTED) {
+            logger.info("WhatsApp is not connected");
+            return null;
+        }
+        const socket = this.getSocket(apiKey);
+        if(!socket) {
+            logger.info("No socket found for API key");
+            return null;
+        } 
+
+        const type = getMimeTypeGroup(file.mimetype);
+        if(type !== "audio") {
+            logger.info("File is not audio");
+            return null;
+        }
+        const messageOptions: any = {
+            audio: file.buffer,
+            mimetype: file.mimetype,
+            ptt: true
+        }
+
+        const message = await socket.sendMessage(formatJid(phoneNumber), messageOptions);
+        return message;
+    }
+
+    
 
     async isOnWhatsapp(apiKey: string, phoneNumber: string) {
         const socket = this.getSocket(apiKey);
@@ -248,18 +357,52 @@ class WhatsappService {
         return isWhatsappAvailable?.[0]?.exists;
     }
 
-    async test(apiKey: string){
+    async deleteMessage(apiKey: string, messageKey: WAMessageKey) {
         const socket = this.getSocket(apiKey);
         if(!socket){
             logger.info("No socket found for API key");
             return false;
         }
+        if(!messageKey.remoteJid){
+            logger.info("Message key remote JID is not available");
+            return false;
+        }
+        await socket.sendMessage(messageKey.remoteJid, {
+            delete: messageKey
+        });
+        return true;
+    }
 
-        const isWhatsappAvailable = await socket.onWhatsApp(formatJid("2348054022551"));
-        console.log("[249] onWhatsapp", isWhatsappAvailable);
+    async readMessage(apiKey: string, messageKey: WAMessageKey) {
+        const socket = this.getSocket(apiKey);
+        if(!socket){
+            logger.info("No socket found for API key");
+            return false;
+        }
+        if(!messageKey.remoteJid){
+            logger.info("Message key remote JID is not available");
+            return false;
+        }
+        await socket.readMessages([messageKey]);
+        return true;
+    }
 
-        const isLid = isPnUser(formatJid("2348054022551"));
-        console.log("[251] isLid", isLid);
+    async reactMessage(apiKey: string, messageKey: WAMessageKey, emoji: string) {
+        const socket = this.getSocket(apiKey);
+        if(!socket){
+            logger.info("No socket found for API key");
+            return false;
+        }
+        if(!messageKey.remoteJid){
+            logger.info("Message key remote JID is not available");
+            return false;
+        }
+        await socket.sendMessage(messageKey.remoteJid, {
+            react: {
+                text: emoji,
+                key: messageKey
+            }
+        });
         return true;
     }
 }

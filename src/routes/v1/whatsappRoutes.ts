@@ -8,7 +8,7 @@ import validate from "../../middleware/validate.js";
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 
-router.get('/stream', authMiddleware, (req, res) => {
+router.get('/stream', (req, res) => {
     res.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
@@ -17,18 +17,27 @@ router.get('/stream', authMiddleware, (req, res) => {
 
     res.write(`data: {"status": "connected"}\n\n`);
 
-    const listener = (apiKey: string, message: any) => {
+    const messageListener = (apiKey: string, message: any) => {
         if (apiKey !== res.locals.apiKey) {
             return;
         }
         res.write(`event:message\ndata: ${JSON.stringify(message)}\n\n`);
     }
 
-    whatsappService.on('message', listener);
+    const updateListener = (apiKey: string, update: any) => {
+        if (apiKey !== res.locals.apiKey) {
+            return;
+        }
+        // res.write(`event:message-update\ndata: ${JSON.stringify(update)}\n\n`);
+    }
+
+    whatsappService.on('message', messageListener);
+    whatsappService.on('message.update', updateListener);
 
     req.on('close', () => {
         logger.info('Client disconnected');
-        whatsappService.off('message', listener);
+        whatsappService.off('message', messageListener);
+        whatsappService.off('message.update', updateListener);
         res.end();
     })
 });
@@ -103,7 +112,8 @@ router.post('/send/file', authMiddleware, upload.single('file'), validate({
 
 router.get("/test", authMiddleware, async (req, res) => {
     const apiKey = res.locals.apiKey;
-    const result = await whatsappService.test(apiKey);
+    // const socket = await whatsappService.readMessage(apiKey);
+    // return res.json(socket?.user);
     return res.end();
 });
 
