@@ -49,18 +49,18 @@ async function log(msg: any, level: LogLevel, source?: string) {
     }
 }
 
-export function nameLogger(loggerInstance: any, name: string) {
-    return {
-        info: (message: any) => loggerInstance.info(message, name),
-        debug: (message: any) => loggerInstance.debug(message, name),
-        error: (message: any) => loggerInstance.error(message, name),
-        warn: (message: any) => loggerInstance.warn(message, name),
-    };
-}
-
 export const logger = {
     info: (message: any, source?: string) => log(message, "INFO", source),
     debug: (message: any, source?: string) => log(message, "DEBUG", source),
     error: (message: any, source?: string) => log(message, "ERROR", source),
     warn: (message: any, source?: string) => log(message, "WARN", source),
 };
+
+export function nameLogger(name: string) {
+    return {
+        info: (message: any) => logger.info(message, name),
+        debug: (message: any) => logger.debug(message, name),
+        error: (message: any) => logger.error(message, name),
+        warn: (message: any) => logger.warn(message, name),
+    };
+}

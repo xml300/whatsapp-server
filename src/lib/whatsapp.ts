@@ -3,16 +3,15 @@ import makeWASocket, { DisconnectReason } from "baileys";
 import { Boom } from "@hapi/boom";
 import { EventEmitter } from "events";
 import pino from "pino";
-import { ConnectionStatus, type ClientStateInfo } from "../types/whatsapp.js";
-import type { WhatsappEvents } from "../types/whatsapp.js";
+import { ConnectionStatus, type ClientStateInfo, type WhatsappEvents } from "../types/whatsapp.js";
 import { formatJid } from "../utils/format.js";
-import { logger as _logger, nameLogger } from "./logger.js";
+import { nameLogger } from "./logger.js";
 import { useNoSQLAuthState } from "./auth.js";
 import { Credential, KeyStore } from "../data/db.js";
 import { Users } from "../data/models/users.js";
 import { ApiKeys } from "../data/models/api-keys.js";
 
-const logger = nameLogger(_logger, "WhatsappService");
+const logger = nameLogger("WhatsappService");
 
 
 class WhatsappService {
@@ -142,12 +141,12 @@ class WhatsappService {
     }
 
     async getPairingCode(apiKey: string, phoneNumber: string) {
-        const stateInfo = this.sockets.get(apiKey);
-        if (!stateInfo) {
+        const socket = this.getSocket(apiKey);
+        if (!socket) {
             logger.info("No socket found for API key");
             return null;
         }
-        return await stateInfo.socket?.requestPairingCode(phoneNumber);
+        return await socket.requestPairingCode(phoneNumber);
     }
 
     async connect(apiKey: string, phoneNumber: string) {
@@ -176,12 +175,12 @@ class WhatsappService {
     }
 
     async disconnect(apiKey: string) {
-        const stateInfo = this.sockets.get(apiKey);
-        if (!stateInfo) {
+        const socket = this.getSocket(apiKey);
+        if (!socket) {
             logger.info("No socket found for API key");
             return false;
         }
-        stateInfo.socket?.end(undefined);
+        socket.end(undefined);
         this.sockets.delete(apiKey);
         const status = await this.clearSession(apiKey);
         return status;
@@ -194,7 +193,11 @@ class WhatsappService {
             return false;
         }
         const socket = this.getSocket(apiKey);
-        await socket?.sendPresenceUpdate('composing', formatJid(phoneNumber));
+        if(!socket) {
+            logger.info("No socket found for API key");
+            return false;
+        } 
+        await socket.sendPresenceUpdate('composing', formatJid(phoneNumber));
         return true;
     }
 
@@ -205,7 +208,11 @@ class WhatsappService {
             return null;
         }
         const socket = this.getSocket(apiKey);
-        const message = await socket?.sendMessage(formatJid(phoneNumber), {
+        if(!socket) {
+            logger.info("No socket found for API key");
+            return null;
+        } 
+        const message = await socket.sendMessage(formatJid(phoneNumber), {
             text: msgText
         });
         return message;
@@ -218,7 +225,11 @@ class WhatsappService {
             return null;
         }
         const socket = this.getSocket(apiKey);
-        const message = await socket?.sendMessage(formatJid(phoneNumber), {
+        if(!socket) {
+            logger.info("No socket found for API key");
+            return null;
+        } 
+        const message = await socket.sendMessage(formatJid(phoneNumber), {
             document: file.buffer,
             mimetype: file.mimetype,
             fileName: file.originalname,

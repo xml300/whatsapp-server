@@ -4,17 +4,20 @@ import v1Routes from "./routes/v1/_indexRoutes.js";
 import { loggingMiddleware } from "./middleware/logging.js";
 import { logger } from "./lib/logger.js"; 
 import errorMiddleware from "./middleware/error.js";
+import cookieParser from "cookie-parser";
 
 const app = express();
 const PORT = 3000;
 
 app.use(loggingMiddleware);
+app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }))
 app.use(express.json());
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key']
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
+    credentials: true
 }));
 
 

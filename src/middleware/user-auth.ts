@@ -11,6 +11,7 @@ export default function userAuthMiddleware(req: Request, res: Response, next: Ne
             }
         })
     }
-    
+    res.locals.userId = authToken.userId;
+    res.locals.phoneNumber = authToken.phoneNumber;
     next();
 }

@@ -2,7 +2,7 @@ import type { IApiKey } from "../../types/models.js";
 import { ApiKey } from "../db.js";
 
 export const ApiKeys = {
-    create: async (data: IApiKey) => {
+    create: async (data: Omit<IApiKey, "_id" | "createdAt" | "updatedAt">) => {
         const apiKey = await ApiKey.create(data);
         return apiKey;
     },
