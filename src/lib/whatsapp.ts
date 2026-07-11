@@ -1,5 +1,5 @@
 
-import makeWASocket, { DisconnectReason } from "baileys";
+import makeWASocket, { DisconnectReason, isLidUser, isPnUser } from "baileys";
 import { Boom } from "@hapi/boom";
 import { EventEmitter } from "events";
 import pino from "pino";
@@ -236,6 +236,31 @@ class WhatsappService {
             caption: caption || ""
         })
         return message;
+    }
+
+    async isOnWhatsapp(apiKey: string, phoneNumber: string) {
+        const socket = this.getSocket(apiKey);
+        if(!socket){
+            logger.info("No socket found for API key");
+            return false;
+        }
+        const isWhatsappAvailable = await socket.onWhatsApp(formatJid(phoneNumber));
+        return isWhatsappAvailable?.[0]?.exists;
+    }
+
+    async test(apiKey: string){
+        const socket = this.getSocket(apiKey);
+        if(!socket){
+            logger.info("No socket found for API key");
+            return false;
+        }
+
+        const isWhatsappAvailable = await socket.onWhatsApp(formatJid("2348054022551"));
+        console.log("[249] onWhatsapp", isWhatsappAvailable);
+
+        const isLid = isPnUser(formatJid("2348054022551"));
+        console.log("[251] isLid", isLid);
+        return true;
     }
 }
 

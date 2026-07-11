@@ -100,4 +100,11 @@ router.post('/send/file', authMiddleware, upload.single('file'), validate({
     });
 });
 
+
+router.get("/test", authMiddleware, async (req, res) => {
+    const apiKey = res.locals.apiKey;
+    const result = await whatsappService.test(apiKey);
+    return res.end();
+});
+
 export default router;
