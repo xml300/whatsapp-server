@@ -73,10 +73,19 @@ router.post('/send/typing', authMiddleware, validate([rules.phoneNumber()]), asy
     const success = await whatsappService.sendTyping(apiKey, phoneNumber);
 
     if (!success) {
-        return res.status(400).json({ status: "error", message: "Failed to send typing indicator" });
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 400,
+                message: "Failed to send typing indicator"
+            }
+        });
     }
 
-    return res.json({ status: "success", message: "Typing sent successfully" });
+    return res.json({
+        success: true,
+        data: { message: "Typing sent successfully" }
+    });
 });
 
 /**
@@ -108,9 +117,18 @@ router.post('/send/text', authMiddleware, validate([rules.phoneNumber(), rules.m
     const { phoneNumber, message } = req.body;
     const success = await whatsappService.sendMessage(apiKey, phoneNumber, message);
     if (!success) {
-        return res.status(400).json({ status: "error", message: "Failed to send message" });
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 400,
+                message: "Failed to send message"
+            }
+        });
     }
-    return res.json({ status: "success", message: "Message sent successfully" });
+    return res.json({
+        success: true,
+        data: { message: "Message sent successfully" }
+    });
 });
 
 /**
@@ -147,9 +165,18 @@ router.post('/send/file', authMiddleware, upload.single('file'), validate([rules
     logger.info({ body: req.body, file: req.file?.originalname });
     const success = await whatsappService.sendMediaFile(apiKey, phoneNumber, file, caption);
     if (!success) {
-        return res.status(400).json({ status: "error", message: "Failed to send file" });
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 400,
+                message: "Failed to send file"
+            }
+        });
     }
-    return res.json({ status: "success", message: "File sent successfully" });
+    return res.json({
+        success: true,
+        data: { message: "File sent successfully" }
+    });
 });
 
 export default router;

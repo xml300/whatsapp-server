@@ -6,16 +6,22 @@ export default async function authMiddleware(req: Request, res: Response, next: 
 
     if(!apiKey){
         return res.status(401).json({
-            status: "error",
-            message: "API Key is required"
+            success: false,
+            error: {
+                code: 401,
+                message: "API Key is required"
+            }
         });
     }
 
     const user = await Users.get(apiKey);
     if(!user || !user.phoneNumber){
         return res.status(401).json({
-            status: "error",
-            message: "Invalid API Key"
+            success: false,
+            error: {
+                code: 401,
+                message: "Invalid API Key"
+            }
         });
     }
 

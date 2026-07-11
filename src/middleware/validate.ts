@@ -48,9 +48,12 @@ export default function validate(rules: ValidationRule[]) {
         }
         if (validationErrors.length > 0) {
             return res.status(412).json({
-                status: "error",
-                message: "Validation failed",
-                details: validationErrors
+                success: false,
+                error: {
+                    code: 412,
+                    message: "Validation failed",
+                    details: validationErrors
+                }
             });
         }
         next();

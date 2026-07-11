@@ -19,12 +19,14 @@ router.get('/logs', async (req, res) => {
     const logCount = await Log.countDocuments();
     const totalPages = Math.ceil(logCount / numLimit);
     return res.json({
-        status: "success",
-        totalPages,
-        currentPage: numPage,
-        logsPerPage: numLimit,
-        totalLogs: logCount,
-        logs
+        success: true,
+        data: logs,
+        meta: {
+            totalPages,
+            currentPage: numPage,
+            logsPerPage: numLimit,
+            totalLogs: logCount
+        }
     });
 });
 

@@ -30,7 +30,10 @@ app.use(cors({
  */
 app.get('/api/health', (req, res) => {
     logger.info("Health route hit!");
-    res.json({ ok: true });
+    res.json({
+        success: true,
+        data: { ok: true }
+    });
 });
 
 app.use('/api/v1', v1Routes);
