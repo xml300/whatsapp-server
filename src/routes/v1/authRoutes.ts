@@ -5,30 +5,16 @@ import { whatsappService } from "../../lib/whatsapp.js";
 import authMiddleware from "../../middleware/auth.js";
 import { logger } from "../../lib/logger.js";
 import validate from "../../middleware/validate.js";
-import { rules } from "../../utils/validators.js";
 
 const router = Router();
 
-/**
- * @openapi
- * /api/auth/register:
- *   post:
- *     summary: Register a new user
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               phoneNumber:
- *                 type: string
- *                 description: User's phone number
- *     responses:
- *       200:
- *         description: User registered successfully
- */
-router.post('/register', validate([rules.phoneNumber()]), async (req, res) => {
+router.post('/register', validate({ 
+    body: { 
+        phoneNumber: "required|phoneNumber",
+        username: "required|string",
+        password: "required|string"
+    } 
+}), async (req, res) => {
     const { username, password, phoneNumber } = req.body;
 
     try {
@@ -52,7 +38,8 @@ router.post('/register', validate([rules.phoneNumber()]), async (req, res) => {
 
 router.post("/api-key/regenerate", authMiddleware, async (req, res) => {
     const apiKey = res.locals.apiKey;
-    const user = await Users.get(apiKey);
+    const userId = res.locals.userId;
+    const user = await Users.getById(userId);
     if (!user || !user.phoneNumber) {
         return res.status(401).json({
             success: false,
@@ -93,20 +80,10 @@ router.post("/api-key/regenerate", authMiddleware, async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /api/auth/connect:
- *   post:
- *     summary: Connect to WhatsApp
- *     security:
- *       - ApiKeyAuth: []
- *     responses:
- *       200:
- *         description: Connection status and QR code if available
- */
 router.post('/connect', authMiddleware, async (req, res) => {
     const apiKey = res.locals.apiKey;
-    const user = await Users.get(apiKey);
+    const userId = res.locals.userId;
+    const user = await Users.getById(userId);
     if (!user || !user.phoneNumber) {
         return res.status(401).json({
             success: false,
@@ -123,20 +100,10 @@ router.post('/connect', authMiddleware, async (req, res) => {
     });
 });
 
-/**
- * @openapi
- * /api/auth/connect/status:
- *   get:
- *     summary: Get connection status
- *     security:
- *       - ApiKeyAuth: []
- *     responses:
- *       200:
- *         description: Whether the connection is ready
- */
 router.get('/connect/status', authMiddleware, async (req, res) => {
     const apiKey = res.locals.apiKey;
-    const user = await Users.get(apiKey);
+    const userId = res.locals.userId;
+    const user = await Users.getById(userId);
     if (!user || !user.phoneNumber) {
         return res.status(401).json({
             success: false,
@@ -154,20 +121,10 @@ router.get('/connect/status', authMiddleware, async (req, res) => {
     });
 });
 
-/**
- * @openapi
- * /api/auth/connect/qr:
- *   get:
- *     summary: Get QR code for connection
- *     security:
- *       - ApiKeyAuth: []
- *     responses:
- *       200:
- *         description: QR code string
- */
 router.get('/connect/qr', authMiddleware, async (req, res) => {
     const apiKey = res.locals.apiKey;
-    const user = await Users.get(apiKey);
+    const userId = res.locals.userId;
+    const user = await Users.getById(userId);
     if (!user || !user.phoneNumber) {
         return res.status(401).json({
             success: false,
@@ -184,20 +141,10 @@ router.get('/connect/qr', authMiddleware, async (req, res) => {
     });
 });
 
-/**
- * @openapi
- * /api/auth/connect/pairing-code:
- *   get:
- *     summary: Get pairing code for connection
- *     security:
- *       - ApiKeyAuth: []
- *     responses:
- *       200:
- *         description: Pairing code string
- */
 router.get('/connect/pairing-code', authMiddleware, async (req, res) => {
     const apiKey = res.locals.apiKey;
-    const user = await Users.get(apiKey);
+    const userId = res.locals.userId;
+    const user = await Users.getById(userId);
     if (!user || !user.phoneNumber) {
         return res.status(401).json({
             success: false,
@@ -216,7 +163,8 @@ router.get('/connect/pairing-code', authMiddleware, async (req, res) => {
 
 router.post('/disconnect', authMiddleware, async (req, res) => {
     const apiKey = res.locals.apiKey;
-    const user = await Users.get(apiKey);
+    const userId = res.locals.userId;
+    const user = await Users.getById(userId);
     if (!user || !user.phoneNumber) {
         return res.status(401).json({
             success: false,

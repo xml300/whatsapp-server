@@ -13,13 +13,21 @@ export const Users = {
         return user;
     },
 
+    getById: async (id: string) => {
+        const user = await User.findById(id);
+        if (!user) return null;
+        return user;
+    },
+
     getByUsername: async (username: string) => {
         const user = await User.findOne({ username });
+        if (!user) return null;
         return user;
     },
 
     getByPhoneNumber: async (phoneNumber: string) => {
         const user = await User.findOne({ phoneNumber });
+        if (!user) return null;
         return user;
     },
 

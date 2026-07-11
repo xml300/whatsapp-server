@@ -10,6 +10,7 @@ import { logger as _logger, nameLogger } from "./logger.js";
 import { useNoSQLAuthState } from "./auth.js";
 import { Credential, KeyStore } from "../data/db.js";
 import { Users } from "../data/models/users.js";
+import { ApiKeys } from "../data/models/api-keys.js";
 
 const logger = nameLogger(_logger, "WhatsappService");
 
@@ -24,7 +25,12 @@ class WhatsappService {
     }
 
     private async clearSession(apiKey: string) {
-        const user = await Users.get(apiKey);
+        const apiKeyData = await ApiKeys.get(apiKey);
+        if (!apiKeyData) {
+            logger.info("No API key record found");
+            return false;
+        }
+        const user = await Users.getById(apiKeyData.userId);
         if (!user || !user.phoneNumber) {
             logger.info("No user found for API key");
             return false;

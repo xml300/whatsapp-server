@@ -18,16 +18,6 @@ app.use(cors({
 }));
 
 
-
-/**
- * @openapi
- * /health:
- *   get:
- *     description: Health check endpoint
- *     responses:
- *       200:
- *         description: Returns ok.
- */
 app.get('/api/health', (req, res) => {
     logger.info("Health route hit!");
     res.json({

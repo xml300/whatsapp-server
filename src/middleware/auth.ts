@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { Users } from "../data/models/users.js";
+import { ApiKeys } from "../data/models/api-keys.js";
 
 export default async function authMiddleware(req: Request, res: Response, next: NextFunction) {
     const apiKey = req.headers["x-api-key"] as string;
@@ -14,8 +15,8 @@ export default async function authMiddleware(req: Request, res: Response, next: 
         });
     }
 
-    const user = await Users.get(apiKey);
-    if(!user || !user.phoneNumber){
+    const apiKeyData = await ApiKeys.get(apiKey);
+    if(!apiKeyData){
         return res.status(401).json({
             success: false,
             error: {
@@ -25,6 +26,7 @@ export default async function authMiddleware(req: Request, res: Response, next: 
         });
     }
 
-    res.locals.apiKey = apiKey;
+    res.locals.userId = apiKeyData.userId;
+    res.locals.apiKey = apiKeyData.apiKey;
     return next();
 }
