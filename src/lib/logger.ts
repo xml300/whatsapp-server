@@ -2,6 +2,8 @@ import { Log } from "../data/db.js";
 
 type LogLevel = "INFO" | "DEBUG" | "ERROR" | "WARN";
 
+const logBuffer: any[] = [];
+
 const colors = {
     reset: "\x1b[0m",
     dim: "\x1b[2m",
@@ -26,17 +28,22 @@ async function log(msg: any, level: LogLevel, source?: string) {
     const timestamp = new Date().toISOString();
     const message = typeof msg === "string" ? msg : JSON.stringify(msg);
 
-    try {
-        await Log.create({
-            id: id,
-            message: message,
-            level: level,
-            timestamp: new Date(),
-            source: source || "system"
-        });
-    } catch (dbErr) {
-        console.error(`${colors.red}[LOGGER ERROR] Failed to save log to DB:${colors.reset}`, dbErr);
+    if (logBuffer.length > 50) {
+        try {
+            await Log.insertMany(logBuffer);
+            logBuffer.length = 0;
+        } catch (dbErr) {
+            console.error(`${colors.red}[LOGGER ERROR] Failed to save log to DB:${colors.reset}`, dbErr);
+        }
     }
+    logBuffer.push({
+        id: id,
+        message: message,
+        level: level,
+        timestamp: new Date(),
+        source: source || "system"
+    });
+
 
     const levelColor = colorForLevel(level);
     const sourceTag = `${colors.dim}[${source || "system"}]${colors.reset} `;

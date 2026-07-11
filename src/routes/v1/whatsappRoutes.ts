@@ -7,6 +7,7 @@ import validate from "../../middleware/validate.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const router = express.Router();
+router.use(authMiddleware);
 
 router.get('/stream', (req, res) => {
     res.writeHead(200, {
@@ -42,7 +43,11 @@ router.get('/stream', (req, res) => {
     })
 });
 
-router.post('/send/typing', authMiddleware, validate({ body: { phoneNumber: "required|phoneNumber" } }), async (req, res) => {
+router.post('/send/typing', validate({
+    body: {
+        phoneNumber: "required|phoneNumber"
+    }
+}), async (req, res) => {
     const apiKey = res.locals.apiKey;
     const { phoneNumber } = req.body;
     const success = await whatsappService.sendTyping(apiKey, phoneNumber);
@@ -63,11 +68,11 @@ router.post('/send/typing', authMiddleware, validate({ body: { phoneNumber: "req
     });
 });
 
-router.post('/send/text', authMiddleware, validate({ 
-    body: { 
-        phoneNumber: "required|phoneNumber", 
-        message: "required|message" 
-    } 
+router.post('/send/text', validate({
+    body: {
+        phoneNumber: "required|phoneNumber",
+        message: "required|message"
+    }
 }), async (req, res) => {
     const apiKey = res.locals.apiKey;
     const { phoneNumber, message } = req.body;
@@ -87,7 +92,7 @@ router.post('/send/text', authMiddleware, validate({
     });
 });
 
-router.post('/send/file', authMiddleware, upload.single('file'), validate({
+router.post('/send/file', upload.single('file'), validate({
     body: {
         phoneNumber: "required|phoneNumber",
         caption: "string"
@@ -115,7 +120,7 @@ router.post('/send/file', authMiddleware, upload.single('file'), validate({
 });
 
 
-router.get("/test", authMiddleware, async (req, res) => {
+router.get("/test", async (req, res) => {
     const apiKey = res.locals.apiKey;
     // const socket = await whatsappService.readMessage(apiKey);
     // return res.json(socket?.user);

@@ -6,8 +6,7 @@ import { logger } from "./lib/logger.js";
 import errorMiddleware from "./middleware/error.js";
 import cookieParser from "cookie-parser";
 import { whatsappService } from "./lib/whatsapp.js";
-import { handleShutdown, handleStartup } from "./utils/server.js";
-import { serverUnavailable } from "@hapi/boom";
+import { handleShutdown, handleStartup } from "./utils/server.js"; 
 
 const app = express();
 const PORT = 3000;
@@ -17,7 +16,7 @@ app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }))
 app.use(express.json());
 app.use(cors({
-    origin: '*',
+    origin: 'http://localhost:3000/',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
     credentials: true

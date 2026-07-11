@@ -9,8 +9,7 @@ import { nameLogger } from "./logger.js";
 import { useNoSQLAuthState } from "./auth.js";
 import { Credential, KeyStore } from "../data/db.js";
 import { Users } from "../data/models/users.js";
-import { ApiKeys } from "../data/models/api-keys.js";
-import { SocketAddress } from "net";
+import { ApiKeys } from "../data/models/api-keys.js"; 
 
 const logger = nameLogger("WhatsappService");
 
@@ -87,7 +86,6 @@ class WhatsappService {
 
     private registerConnectionHandler(stateInfo: ClientStateInfo, apiKey: string, phoneNumber: string) {
         const { socket } = stateInfo;
-        let retries = 0;
         socket?.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             logger.info("[131] " + JSON.stringify(update, null, 2))
@@ -99,10 +97,10 @@ class WhatsappService {
                 const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
                 stateInfo.status = ConnectionStatus.DISCONNECTED;
-                if (shouldReconnect && retries < 5) {
+                if (shouldReconnect && stateInfo.retries < 5) {
                     logger.info("Connection closed. Reconnecting...");
-                    retries = retries + 1;
-                    setTimeout(() => this.connect(apiKey, phoneNumber), 5000 * retries);
+                    stateInfo.retries = stateInfo.retries + 1;
+                    setTimeout(() => this.connect(apiKey, phoneNumber), 5000 * stateInfo.retries);
                 } else {
                     logger.info("Connection closed. Not reconnecting...");
                 }
@@ -110,6 +108,7 @@ class WhatsappService {
                 logger.info("✅ WhatsApp is connected!");
                 stateInfo.status = ConnectionStatus.CONNECTED;
                 this.emit('connected', apiKey);
+                stateInfo.retries = 0;
             }
         });
     }
@@ -194,6 +193,11 @@ class WhatsappService {
     }
 
     async connect(apiKey: string, phoneNumber: string) {
+        if(this.sockets.has(apiKey)){
+            logger.info("Socket already exists for API key");
+            return this.sockets.get(apiKey)!.status;
+        }
+
         const { state, saveCreds } = await useNoSQLAuthState(phoneNumber);
         const socket = makeWASocket({
             version: [2, 3000, 1034195523],
@@ -209,7 +213,8 @@ class WhatsappService {
             phoneNumber,
             status: ConnectionStatus.DISCONNECTED,
             isPairingReady: false,
-            qr: null
+            qr: null,
+            retries: 0
         }
 
         this.registerConnectionHandler(stateInfo, apiKey, phoneNumber);
@@ -285,7 +290,6 @@ class WhatsappService {
         } 
 
         const messageOptions: any = {
-            mimetype: mediaType, 
             caption: caption || ""
         }
 

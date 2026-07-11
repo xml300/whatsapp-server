@@ -20,4 +20,5 @@ export interface ClientStateInfo {
     status: ConnectionStatus;
     isPairingReady: boolean;
     qr: string | null;
+    retries: number;
 }

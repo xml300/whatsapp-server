@@ -46,7 +46,13 @@ router.post('/login', validate({
         maxAge: 1000 * 60 * 60
     }).json({
         success: true,
-        data: { user }
+        data: {
+            user: {
+                username: user.username,
+                phoneNumber: user.phoneNumber,
+                createdAt: user.createdAt
+            }
+        }
     });
 
 });
@@ -71,7 +77,13 @@ router.post('/register', validate({
         maxAge: 1000 * 60 * 60
     }).json({
         success: true,
-        data: { user }
+        data: {
+            user: {
+                username: user.username,
+                phoneNumber: user.phoneNumber,
+                createdAt: user.createdAt
+            }
+        }
     });
 
 });
