@@ -3,6 +3,8 @@ import { Log } from "../../data/db.js";
 
 import authRoutes from "./authRoutes.js";
 import whatsappRoutes from "./whatsappRoutes.js";
+import apiKeyRoutes from "./apiKeyRoutes.js";
+import connectRoutes from "./connectRoutes.js";
 
 const router = express.Router();
 
@@ -32,6 +34,8 @@ router.get('/logs', async (req, res) => {
 
 
 router.use('/auth', authRoutes);
+router.use('/api-keys', apiKeyRoutes);
+router.use('/connection', connectRoutes);
 router.use('/', whatsappRoutes);
 
 

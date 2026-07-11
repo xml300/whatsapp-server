@@ -37,13 +37,10 @@ export function loggingMiddleware(req: Request, res: Response, next: NextFunctio
 
         const status = res.statusCode;
         const contentLength = res.getHeader("content-length") ?? "-";
-        const timestamp = new Date().toISOString();
-
         const methodColor = colorForMethod(req.method);
         const statusColor = colorForStatus(status);
 
         logger.info(
-            `${colors.dim}[${timestamp}]${colors.reset} ` +
             `${methodColor}${req.method}${colors.reset} ` +
             `${req.originalUrl} ` +
             `${statusColor}${status}${colors.reset} ` +
