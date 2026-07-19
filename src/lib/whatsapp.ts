@@ -12,6 +12,7 @@ import { InvalidMessageKeyError, NotConnectedError, RecipientNotOnWhatsappError,
 import { clearUserKeys } from "../data/queries.js";
 
 const logger = nameLogger("WhatsappService");
+const waLogger = pino(pino.destination("./server.log"));
 const latestVersion = (await fetchLatestBaileysVersion()).version;
 
 function getMimeTypeGroup(mimeType: string) {
@@ -192,7 +193,8 @@ class WhatsappService {
 
             if (existing && existing.socket) {
                 this.cleanupEventListeners(existing.socket);
-                existing.socket.end(undefined);
+                existing.timeout ? clearTimeout(existing.timeout) : null;
+                await existing.socket.logout();
             }
 
             const retries = existing ? existing.retries : 0;
@@ -201,9 +203,7 @@ class WhatsappService {
             const socket = makeWASocket({
                 version: latestVersion,
                 auth: state,
-                logger: pino(
-                    pino.destination('./server.log')
-                )
+                logger: waLogger
             });
 
             const stateInfo: ClientStateInfo = {
@@ -243,7 +243,7 @@ class WhatsappService {
             }
             if (stateInfo.socket) {
                 this.cleanupEventListeners(stateInfo.socket);
-                stateInfo.socket.logout().catch((err) => logger.error(err));
+                await stateInfo.socket.logout().catch((err) => logger.error(err));
             }
             const status = await this.clearSession(apiKey);
             return status;
