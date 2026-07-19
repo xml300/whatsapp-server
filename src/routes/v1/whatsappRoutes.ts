@@ -120,11 +120,6 @@ router.post('/send/file', upload.single('file'), validate({
 });
 
 
-router.get("/test", async (req, res) => {
-    const apiKey = res.locals.apiKey;
-    // const socket = await whatsappService.readMessage(apiKey);
-    // return res.json(socket?.user);
-    return res.end();
-});
+ 
 
 export default router;

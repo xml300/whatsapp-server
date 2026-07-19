@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 import express from "express";
 import cors from "cors"; 
 import v1Routes from "./routes/v1/_indexRoutes.js";
@@ -9,14 +11,14 @@ import { whatsappService } from "./lib/whatsapp.js";
 import { handleShutdown, handleStartup } from "./utils/server.js"; 
 
 const app = express();
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || "3000");
 
 app.use(loggingMiddleware);
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }))
 app.use(express.json());
 app.use(cors({
-    origin: 'http://localhost:3000/',
+    origin: 'http://localhost:3000',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
     credentials: true

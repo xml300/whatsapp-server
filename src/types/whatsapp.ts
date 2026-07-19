@@ -21,4 +21,5 @@ export interface ClientStateInfo {
     isPairingReady: boolean;
     qr: string | null;
     retries: number;
+    timeout?: NodeJS.Timeout;
 }

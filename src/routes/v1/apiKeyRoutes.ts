@@ -10,8 +10,7 @@ router.use(userAuthMiddleware);
 
 router.get("/", async (req, res) => {
     const userId = res.locals.userId;
-    const apiKeys = await ApiKeys.getByUserId(userId);
-    console.log(apiKeys)
+    const apiKeys = await ApiKeys.getByUserId(userId); 
     return res.json({
         success: true,
         data: { apiKeys }

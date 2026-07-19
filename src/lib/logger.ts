@@ -2,7 +2,7 @@ import { Log } from "../data/db.js";
 
 type LogLevel = "INFO" | "DEBUG" | "ERROR" | "WARN";
 
-const logBuffer: any[] = [];
+export const logBuffer: any[] = [];
 
 const colors = {
     reset: "\x1b[0m",
