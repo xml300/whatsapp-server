@@ -45,12 +45,12 @@ router.get('/stream', (req, res) => {
 
 router.post('/send/typing', validate({
     body: {
+        sessionId: "required|string",
         phoneNumber: "required|phoneNumber"
     }
 }), async (req, res) => {
-    const apiKey = res.locals.apiKey;
-    const { phoneNumber } = req.body;
-    const success = await whatsappService.sendTyping(apiKey, phoneNumber);
+    const { sessionId, phoneNumber } = req.body;
+    const success = await whatsappService.sendTyping(sessionId, phoneNumber);
 
     if (!success) {
         return res.status(400).json({
@@ -70,13 +70,13 @@ router.post('/send/typing', validate({
 
 router.post('/send/text', validate({
     body: {
+        sessionId: "required|string",
         phoneNumber: "required|phoneNumber",
         message: "required|message"
     }
 }), async (req, res) => {
-    const apiKey = res.locals.apiKey;
-    const { phoneNumber, message } = req.body;
-    const success = await whatsappService.sendMessage(apiKey, phoneNumber, message);
+    const { sessionId, phoneNumber, message } = req.body;
+    const success = await whatsappService.sendMessage(sessionId, phoneNumber, message);
     if (!success) {
         return res.status(400).json({
             success: false,
@@ -94,16 +94,16 @@ router.post('/send/text', validate({
 
 router.post('/send/file', upload.single('file'), validate({
     body: {
+        sessionId: "required|string",
         phoneNumber: "required|phoneNumber",
         caption: "string"
     },
     file: "required|file"
 }), async (req, res) => {
-    const apiKey = res.locals.apiKey;
-    const { phoneNumber, caption } = req.body;
+    const { sessionId, phoneNumber, caption } = req.body;
     const file = req.file!;
     logger.info({ body: req.body, file: req.file?.originalname });
-    const success = await whatsappService.sendMediaFile(apiKey, phoneNumber, file, caption);
+    const success = await whatsappService.sendMediaFile(sessionId, phoneNumber, file, caption);
     if (!success) {
         return res.status(400).json({
             success: false,

@@ -1,5 +1,4 @@
 import type { NextFunction, Request, Response } from "express";
-import { Users } from "../data/models/users.js";
 import { ApiKeys } from "../data/models/api-keys.js";
 
 export default async function authMiddleware(req: Request, res: Response, next: NextFunction) {

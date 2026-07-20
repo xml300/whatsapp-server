@@ -26,7 +26,6 @@ const userSchema = new mongoose.Schema<IUser>({
         type: String,
         required: true
     },
-    phoneNumber: String,
     createdAt: {
         type: Date,
         default: Date.now
@@ -47,6 +46,17 @@ const apiKeySchema = new mongoose.Schema<IApiKey>({
     updatedAt: {
         type: Date,
         default: Date.now
+    }
+});
+
+const phoneNumbersSchema = new mongoose.Schema({
+    userId: {
+        type: String,
+        required: true
+    },
+    phoneNUmber: {
+        type: String,
+        required: true
     }
 });
 
@@ -71,9 +81,26 @@ const logSchema = new mongoose.Schema({
     timestamp: Date,
 });
 
+const sessionSchema = new mongoose.Schema({
+    id: {
+        type: String,
+        required: true
+    },
+    userId: {
+        type: String,
+        required: true
+    },
+    phoneNumber: {
+        type: String,
+        required: true
+    }
+});
+
 
 export const User = mongoose.model<IUser>("User", userSchema);
 export const ApiKey = mongoose.model<IApiKey>("ApiKey", apiKeySchema);
+export const PhoneNumber = mongoose.model("PhoneNumber", phoneNumbersSchema);
 export const Credential = mongoose.model("Credential", credentialSchema);
 export const KeyStore = mongoose.model("KeyStore", keyStoreSchema);
 export const Log = mongoose.model("Log", logSchema);
+export const Session = mongoose.model("Session", sessionSchema);

@@ -12,7 +12,7 @@ export abstract class WhatsappServiceError extends Error {
 export class SessionNotFoundError extends WhatsappServiceError {
     readonly code = "SESSION_NOT_FOUND";
     constructor(apiKey: string){
-        super(`Session not found for API key: ${apiKey}`, apiKey);
+        super(`Session not found`, apiKey);
     }
 }
 
@@ -24,7 +24,7 @@ export class NotConnectedError extends WhatsappServiceError {
 }
 
 export class RecipientNotOnWhatsappError extends WhatsappServiceError {
-    readonly code = "RECIPENT_NOT_ON_WHATSAPP";
+    readonly code = "RECIPIENT_NOT_ON_WHATSAPP";
     constructor(apiKey: string, phoneNumber: string){
         super(`${phoneNumber} is not on WhatsApp`, apiKey);
     }
@@ -41,6 +41,13 @@ export class UnsupportedMediaTypeError extends WhatsappServiceError {
   readonly code = "UNSUPPORTED_MEDIA_TYPE";
   constructor(apiKey: string, public readonly mimeType: string) {
     super(`Unsupported media type: ${mimeType}`, apiKey);
+  }
+}
+
+export class SsrfBlockedUrlError extends WhatsappServiceError {
+  readonly code = "BLOCKED_URL";
+  constructor(apiKey: string) {
+    super(`The provided media URL is not allowed`, apiKey);
   }
 }
 

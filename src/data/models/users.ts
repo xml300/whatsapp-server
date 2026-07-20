@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
 import { createHash } from "crypto";
 
-import { User } from "../../data/db.js";
+import { PhoneNumber, User } from "../../data/db.js";
 import type { IUser } from "../../types/models.js";
 
 export const Users = {
@@ -34,9 +34,21 @@ export const Users = {
     },
 
     getByPhoneNumber: async (phoneNumber: string) => {
-        const user = await User.findOne({ phoneNumber });
-        if (!user) return null;
+        const number = await PhoneNumber.findOne({ phoneNumber });
+        if (!number) return null;
+        const user = await User.findOne({_id: number.userId});
+        if(!user) return null;
         return user;
+    },
+
+    getPhoneNumbers: async (id: string) => {
+        const numbers = await PhoneNumber.find({userId: id});
+        return numbers;
+    },
+
+    hasPhoneNumber: async (id: string, phoneNumber: string) => {
+        const number = await PhoneNumber.findOne({userId: id, phoneNumber: phoneNumber});
+        return !!number;
     },
 
     update: async (id: string, update: Record<string, any>) => {
