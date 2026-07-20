@@ -14,8 +14,7 @@ export const Users = {
         const user = new User({
             _id: createHash('sha256').update(data.username).digest('hex'),
             username: data.username,
-            password: await bcrypt.hash(data.password, 12),
-            phoneNumber: data.phoneNumber
+            password: await bcrypt.hash(data.password, 12)
         });
         await user.save();
         return user;

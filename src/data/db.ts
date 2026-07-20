@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import "dotenv/config";
 import { logger } from "../lib/logger.js";
-import type { IApiKey, IUser } from "../types/models.js";
+import type { IApiKey, IPhoneNumber, ISession, IUser } from "../types/models.js";
 
 const DATABASE_URL = process.env.MONGODB_URL;
 
@@ -49,12 +49,12 @@ const apiKeySchema = new mongoose.Schema<IApiKey>({
     }
 });
 
-const phoneNumbersSchema = new mongoose.Schema({
+const phoneNumbersSchema = new mongoose.Schema<IPhoneNumber>({
     userId: {
         type: String,
         required: true
     },
-    phoneNUmber: {
+    phoneNumber: {
         type: String,
         required: true
     }
@@ -81,7 +81,7 @@ const logSchema = new mongoose.Schema({
     timestamp: Date,
 });
 
-const sessionSchema = new mongoose.Schema({
+const sessionSchema = new mongoose.Schema<ISession>({
     id: {
         type: String,
         required: true
@@ -99,8 +99,8 @@ const sessionSchema = new mongoose.Schema({
 
 export const User = mongoose.model<IUser>("User", userSchema);
 export const ApiKey = mongoose.model<IApiKey>("ApiKey", apiKeySchema);
-export const PhoneNumber = mongoose.model("PhoneNumber", phoneNumbersSchema);
+export const PhoneNumber = mongoose.model<IPhoneNumber>("PhoneNumber", phoneNumbersSchema);
 export const Credential = mongoose.model("Credential", credentialSchema);
 export const KeyStore = mongoose.model("KeyStore", keyStoreSchema);
 export const Log = mongoose.model("Log", logSchema);
-export const Session = mongoose.model("Session", sessionSchema);
+export const Session = mongoose.model<ISession>("Session", sessionSchema);

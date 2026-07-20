@@ -37,7 +37,7 @@ router.post('/login', validate({
             }
         });
     }
-    const token = jwt.sign({ userId: user._id, phoneNumber: user.phoneNumber }, Config.JWT_SECRET, {
+    const token = jwt.sign({ userId: user._id }, Config.JWT_SECRET, {
         expiresIn: "1h"
     });
     return res.cookie('auth_token', token, {
@@ -48,8 +48,7 @@ router.post('/login', validate({
         success: true,
         data: {
             user: {
-                username: user.username,
-                phoneNumber: user.phoneNumber,
+                username: user.username, 
                 createdAt: user.createdAt
             }
         }
@@ -61,14 +60,13 @@ router.post('/login', validate({
 
 router.post('/register', validate({
     body: {
-        phoneNumber: "required|phoneNumber",
         username: "required|string",
         password: "required|string"
     }
 }), async (req, res) => {
-    const { username, password, phoneNumber } = req.body;
-    const user = await Users.create({ phoneNumber, username, password });
-    const token = jwt.sign({ userId: user._id, phoneNumber: user.phoneNumber }, Config.JWT_SECRET, {
+    const { username, password } = req.body;
+    const user = await Users.create({ username, password });
+    const token = jwt.sign({ userId: user._id }, Config.JWT_SECRET, {
         expiresIn: "1h"
     });
     return res.cookie('auth_token', token, {
@@ -80,7 +78,6 @@ router.post('/register', validate({
         data: {
             user: {
                 username: user.username,
-                phoneNumber: user.phoneNumber,
                 createdAt: user.createdAt
             }
         }

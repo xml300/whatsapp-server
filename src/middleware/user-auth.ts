@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import jwt, { JsonWebTokenError, type JwtPayload } from "jsonwebtoken";
+import jwt, { type JwtPayload } from "jsonwebtoken";
 import { Config } from "../lib/config.js";
 
 export default function userAuthMiddleware(req: Request, res: Response, next: NextFunction){
@@ -15,11 +15,10 @@ export default function userAuthMiddleware(req: Request, res: Response, next: Ne
     }
     try {
         const payload = jwt.verify(authToken, Config.JWT_SECRET) as JwtPayload;
-        res.locals.userId = payload.userId;
-        res.locals.phoneNumber = payload.phoneNumber;
+        res.locals.userId = payload.userId; 
         next();
     } catch (error) {
-        if(error instanceof JsonWebTokenError){
+        if(error instanceof jwt.JsonWebTokenError){
             return res.status(401).json({
                 success: false,
                 error: {

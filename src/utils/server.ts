@@ -14,8 +14,8 @@ export async function handleStartup() {
     try {
         const cachedSessions = await readFile(OUTPUT_PATH);
         const sessions = JSON.parse(cachedSessions.toString());
-        for (const session of sessions) {
-            await whatsappService.connect(session.apiKey, session.phoneNumber);
+        for (const [sessionId, _] of sessions.entries()) {
+            await whatsappService.connect(sessionId);
         }
         await unlink(OUTPUT_PATH);
     } catch (error) {

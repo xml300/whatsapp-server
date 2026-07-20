@@ -4,21 +4,26 @@ import { whatsappService } from "../../lib/whatsapp.js";
 import authMiddleware from "../../middleware/auth.js";
 import { Session } from "../../data/db.js";
 import { createHash } from "crypto";
+import validate from "../../middleware/validate.js";
 
 const router = express.Router();
 
-router.post('/', authMiddleware, async (req, res) => {
-    const { number } = req.body;
-    const apiKey = res.locals.apiKey;
+router.post('/', authMiddleware, validate({
+    body: {
+        sessionId: 'required|string',
+        phoneNumber: 'required|phoneNumber'
+    }
+}), async (req, res) => {
+    const { sessionId, phoneNumber } = req.body;
     const userId = res.locals.userId;
-    const hasNumber = await Users.hasPhoneNumber(userId, number);
+    const hasNumber = await Users.hasPhoneNumber(userId, phoneNumber);
     if (!hasNumber) {
         return res.status(401).json({
             code: 401,
             message: 'Number not registered'
         });
     }
-    if (whatsappService.isConnected(apiKey)) {
+    if (whatsappService.isConnected(sessionId)) {
         return res.status(400).json({
             code: 400,
             message: 'Service already connected'
@@ -26,11 +31,11 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
 
-    const status = await whatsappService.connect(apiKey);
+    const status = await whatsappService.connect(sessionId);
     const session = await Session.create({
-        id: createHash('sha256').update(userId + number).digest('hex'),
-        userId: userId,
-        phoneNumber: number
+        id: createHash('sha256').update(userId + phoneNumber).digest('hex'),
+        userId,
+        phoneNumber
     });
     return res.json({
         success: true,

@@ -2,7 +2,6 @@ export interface IUser {
     _id: string,
     username: string,
     password: string,
-    phoneNumber: string,
     createdAt: Date,
     updatedAt: Date
 }
@@ -14,3 +13,14 @@ export interface IApiKey {
     createdAt: Date,
     updatedAt: Date
 }
+
+export interface IPhoneNumber {
+    userId: string,
+    phoneNumber: string
+};
+
+export interface ISession {
+    id: string,
+    userId: string,
+    phoneNumber: string
+};

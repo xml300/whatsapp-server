@@ -7,7 +7,6 @@ import { ConnectionStatus, type ClientStateInfo, type WhatsappEvents } from "../
 import { formatJid } from "../utils/format.js";
 import { nameLogger } from "./logger.js";
 import { useNoSQLAuthState } from "./auth.js";
-import { ApiKeys } from "../data/models/api-keys.js";
 import { InvalidMessageKeyError, NotConnectedError, RecipientNotOnWhatsappError, SessionNotFoundError, SsrfBlockedUrlError, UnsupportedMediaTypeError } from "../errors/whatsapp-errors.js";
 import { clearUserKeys } from "../data/queries.js";
 import { validateMediaUrl } from "../utils/url.js";
@@ -57,7 +56,7 @@ class WhatsappService {
     }
 
     private async clearSession(sessionId: string) {
-        const session = await Session.findOne({id: sessionId});
+        const session = await Session.findOne({ id: sessionId });
         if (!session) {
             logger.info("No session record found");
             return false;
@@ -91,7 +90,7 @@ class WhatsappService {
                     logger.info("Connection closed. Reconnecting...");
                     stateInfo.retries = stateInfo.retries + 1;
                     const timeout = setTimeout(() => this.connect(sessionId), 5000 * stateInfo.retries);
-                    if(stateInfo.timeout) clearTimeout(stateInfo.timeout);
+                    if (stateInfo.timeout) clearTimeout(stateInfo.timeout);
                     stateInfo.timeout = timeout;
                 } else {
                     logger.info("Connection closed. Not reconnecting...");
@@ -197,13 +196,13 @@ class WhatsappService {
 
             if (existing && existing.socket) {
                 this.cleanupEventListeners(existing.socket);
-                if(existing.timeout) clearTimeout(existing.timeout);
+                if (existing.timeout) clearTimeout(existing.timeout);
                 await existing.socket.logout();
             }
 
             const retries = existing ? existing.retries : 0;
-            const session = await Session.findOne({id: sessionId});
-            if(!session){
+            const session = await Session.findOne({ id: sessionId });
+            if (!session) {
                 return null;
             }
 
@@ -239,7 +238,7 @@ class WhatsappService {
         socket?.ev.removeAllListeners('connection.update');
         socket?.ev.removeAllListeners('messages.upsert');
         socket?.ev.removeAllListeners('message-receipt.update');
-        socket?.ev.removeAllListeners('creds.update');    
+        socket?.ev.removeAllListeners('creds.update');
     }
 
     async disconnect(sessionId: string) {
@@ -309,6 +308,35 @@ class WhatsappService {
         return message;
     }
 
+    private buildMediaOptions(mediaType: string, contentType: 'file' | 'url', content: string | Buffer, caption?: string, filename?: string): AnyMediaMessageContent {
+        const media = contentType === 'url'
+            ? { url: content as string }
+            : content as Buffer;
+
+        if (mediaType === "image") {
+            return {
+                image: media,
+                caption: caption || ""
+            };
+        } else if (mediaType === "video") {
+            return {
+                video: media,
+                caption: caption || ""
+            };
+        } else if (mediaType === "audio") {
+            return {
+                audio: media
+            };
+        } else {
+            return {
+                document: media,
+                mimetype: "application/octet-stream",
+                fileName: filename || "document",
+                caption: caption || ""
+            };
+        }
+    }
+
 
     async sendMediaMessage(sessionId: string, phoneNumber: string, mediaType: string, mediaUrl: string, caption?: string) {
         const socket = await this.ensureSendable(sessionId);
@@ -319,31 +347,7 @@ class WhatsappService {
             throw new SsrfBlockedUrlError(sessionId);
         }
 
-        let messageOptions: AnyMediaMessageContent;
-
-        if (mediaType === "image") {
-            messageOptions = {
-                image: { url: mediaUrl },
-                caption: caption || ""
-            };
-        } else if (mediaType === "video") {
-            messageOptions = {
-                video: { url: mediaUrl },
-                caption: caption || ""
-            };
-        } else if (mediaType === "audio") {
-            messageOptions = {
-                audio: { url: mediaUrl }
-            };
-        } else {
-            messageOptions = {
-                document: { url: mediaUrl },
-                mimetype: "application/octet-stream",
-                fileName: mediaUrl.split("/").pop() || "document",
-                caption: caption || ""
-            };
-        }
-
+        const messageOptions: AnyMediaMessageContent = this.buildMediaOptions(mediaType, 'url', mediaUrl, caption);
         const message = await socket.sendMessage(formatJid(phoneNumber), messageOptions);
         return message;
     }
@@ -351,31 +355,7 @@ class WhatsappService {
     async sendMediaFile(sessionId: string, phoneNumber: string, file: Express.Multer.File, caption?: string) {
         const socket = await this.ensureSendable(sessionId);
         const type = getMimeTypeGroup(file.mimetype);
-        let messageOptions: AnyMediaMessageContent;
-
-        if (type === "image") {
-            messageOptions = {
-                image: file.buffer,
-                caption: caption || ""
-            }
-        } else if (type === "video") {
-            messageOptions = {
-                video: file.buffer,
-                caption: caption || ""
-            }
-        } else if (type === "audio") {
-            messageOptions = {
-                audio: file.buffer
-            }
-        } else {
-            messageOptions = {
-                document: file.buffer,
-                mimetype: file.mimetype,
-                fileName: file.originalname,
-                caption: caption || ""
-            }
-        }
-
+        const messageOptions: AnyMediaMessageContent = this.buildMediaOptions(type, 'file', file.buffer, caption, file.originalname);
         const message = await socket.sendMessage(formatJid(phoneNumber), messageOptions);
         return message;
     }
