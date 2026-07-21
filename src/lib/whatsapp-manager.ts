@@ -23,11 +23,8 @@ class WhatsappManager {
 
     get activeSessions() {
         const sessions = [];
-        for (const [key, value] of this.sockets.entries()) {
-            sessions.push({
-                isConnected: value.isConnected(),
-                phoneNumber: (value as any).phoneNumber
-            })
+        for (const key of this.sockets.keys()) {
+            sessions.push(key);
         }
         return sessions;
     }
@@ -60,10 +57,6 @@ class WhatsappManager {
 
     emit<K extends keyof WhatsappEvents>(event: K, ...args: Parameters<WhatsappEvents[K]>) {
         this.emitter.emit(event, ...args);
-    }
-
-    getActiveSessions() {
-        return this.activeSessions;
     }
 
     isConnected(sessionId: string) {

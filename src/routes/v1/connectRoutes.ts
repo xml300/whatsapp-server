@@ -19,14 +19,20 @@ router.post('/', authMiddleware, validate({
     const hasNumber = await Users.hasPhoneNumber(userId, phoneNumber);
     if (!hasNumber) {
         return res.status(401).json({
-            code: 401,
-            message: 'Number not registered'
+            success: false,
+            error: {
+                code: 401,
+                message: 'Number not registered'
+            }
         });
     }
     if (whatsappService.isConnected(sessionId)) {
         return res.status(400).json({
-            code: 400,
-            message: 'Service already connected'
+            success: false,
+            error: {
+                code: 400,
+                message: 'Service already connected'
+            }
         });
     }
     const session = await Session.findOne({id: sessionId});
