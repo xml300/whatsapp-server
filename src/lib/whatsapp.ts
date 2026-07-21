@@ -31,98 +31,74 @@ function getMimeTypeGroup(mimeType: string) {
 }
 
 
-class WhatsappService {
-    private sockets: Map<string, ClientStateInfo>;
-    private isConnecting: Map<string, Promise<void>>;
+export class WhatsappService {
     private emitter: EventEmitter;
 
-    constructor() {
-        this.sockets = new Map();
-        this.isConnecting = new Map();
+    private socket: ReturnType<typeof makeWASocket> | null;
+    private phoneNumber: string;
+    private status: ConnectionStatus;
+    private isPairingReady: boolean;
+    private qr: string | null;
+    private retries: number;
+    private timeout?: NodeJS.Timeout;
+
+    constructor(phoneNumber: string) {
         this.emitter = new EventEmitter();
+
+        this.socket = null;
+        this.phoneNumber = phoneNumber;
+        this.status = ConnectionStatus.DISCONNECTED;
+        this.isPairingReady = false;
+        this.qr = null;
+        this.retries = 0;
     }
 
-    get activeSessions() {
-        const sessions = [];
-        for (const [key, value] of this.sockets.entries()) {
-            sessions.push({
-                apiKey: key,
-                status: value.status,
-                isPairingReady: value.isPairingReady,
-                phoneNumber: value.phoneNumber
-            })
-        }
-        return sessions;
-    }
-
-    private async clearSession(sessionId: string) {
-        const session = await Session.findOne({ id: sessionId });
-        if (!session) {
-            logger.info("No session record found");
-            return false;
-        }
-        const status = await clearUserKeys(session.userId);
-        return status;
-    }
-
-    private getSocket(sessionId: string) {
-        const stateInfo = this.sockets.get(sessionId);
-        if (!stateInfo) {
-            return null;
-        }
-        return stateInfo.socket;
-    }
-
-    private registerConnectionHandler(stateInfo: ClientStateInfo, sessionId: string) {
-        const { socket } = stateInfo;
-        socket?.ev.on('connection.update', async (update) => {
+    private registerConnectionHandler() {
+        this.socket?.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             logger.debug(JSON.stringify(update, null, 2))
             if (qr) {
-                stateInfo.isPairingReady = true;
-                stateInfo.qr = qr;
+                this.isPairingReady = true;
+                this.qr = qr;
             }
             if (connection === 'close') {
                 const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                stateInfo.status = ConnectionStatus.DISCONNECTED;
-                if (shouldReconnect && stateInfo.retries < 5) {
+                this.status = ConnectionStatus.DISCONNECTED;
+                if (shouldReconnect && this.retries < 5) {
                     logger.info("Connection closed. Reconnecting...");
-                    stateInfo.retries = stateInfo.retries + 1;
-                    const timeout = setTimeout(() => this.connect(sessionId), 5000 * stateInfo.retries);
-                    if (stateInfo.timeout) clearTimeout(stateInfo.timeout);
-                    stateInfo.timeout = timeout;
+                    this.retries = this.retries + 1;
+                    const timeout = setTimeout(() => this.connect(), 5000 * this.retries);
+                    if (this.timeout) clearTimeout(this.timeout);
+                    this.timeout = timeout;
                 } else {
                     logger.info("Connection closed. Not reconnecting...");
                 }
             } else if (connection === 'open') {
                 logger.info("✅ WhatsApp is connected!");
-                stateInfo.status = ConnectionStatus.CONNECTED;
-                this.emit('connected', sessionId);
-                stateInfo.retries = 0;
+                this.status = ConnectionStatus.CONNECTED;
+                this.emit('connected', '0');
+                this.retries = 0;
             }
         });
     }
 
-    private registerMessageHandler(stateInfo: ClientStateInfo, sessionId: string) {
-        const { socket } = stateInfo;
-        socket?.ev.on('messages.upsert', async ({ type, messages }) => {
+    private registerMessageHandler() {
+        this.socket?.ev.on('messages.upsert', async ({ type, messages }) => {
             if (type === "append") {
                 return;
             }
 
             for (const message of messages) {
-                this.emit('message', sessionId, message);
+                this.emit('message', '0', message);
             }
         });
     }
 
-    private registerMessageUpdateHandler(stateInfo: ClientStateInfo, sessionId: string) {
-        const { socket } = stateInfo;
-
-        socket?.ev.on('message-receipt.update', (updates) => {
+    private registerMessageUpdateHandler() {
+        this.socket?.ev.on('message-receipt.update', (updates) => {
             for (const update of updates) {
-                this.emit('message.update', sessionId, update);
+                this.emit('message.update', '0', update);
             }
         });
     }
@@ -139,169 +115,116 @@ class WhatsappService {
         this.emitter.emit(event, ...args);
     }
 
-    getActiveSessions() {
-        return this.activeSessions;
+    isConnected() {
+        return this.status === ConnectionStatus.CONNECTED;
     }
 
-    isConnected(sessionId: string) {
-        const stateInfo = this.sockets.get(sessionId);
-        if (!stateInfo) {
-            return false;
-        }
-        return stateInfo.status === ConnectionStatus.CONNECTED;
+    isConnectionReady() {
+        return this.isPairingReady;
     }
 
-    isConnectionReady(sessionId: string) {
-        const stateInfo = this.sockets.get(sessionId);
-        if (!stateInfo) {
-            return false;
-        }
-        return stateInfo.isPairingReady;
-    }
-
-    getQrCode(sessionId: string) {
-        const stateInfo = this.sockets.get(sessionId);
-        if (!stateInfo) {
+    getQrCode() {
+        if (!this.isPairingReady) {
             return null;
         }
-        return stateInfo.qr;
+        return this.qr;
     }
 
     async getPairingCode(sessionId: string) {
-        const stateInfo = this.sockets.get(sessionId);
-        const socket = this.getSocket(sessionId);
-        if (!(socket && stateInfo)) {
+        const socket = this.socket;
+        if (!socket) {
             return null;
         }
-        return await socket.requestPairingCode(stateInfo.phoneNumber);
+        return await socket.requestPairingCode(this.phoneNumber);
     }
 
-    async connect(sessionId: string) {
-        const inflightGuard = this.isConnecting.get(sessionId);
-        if (inflightGuard) {
-            await inflightGuard;
-            return this.sockets.get(sessionId)?.status;
+    async connect() {
+        // Already connected — idempotent, no-op
+        if (this.status === ConnectionStatus.CONNECTED) {
+            logger.info("Already connected for this API key");
+            return this.status;
         }
-        const existing = this.sockets.get(sessionId);
-        let promiseResolve = () => { };
-        const promise = new Promise<void>((resolve) => promiseResolve = resolve);
-        this.isConnecting.set(sessionId, promise);
-        try {
-            // Already connected — idempotent, no-op
-            if (existing?.status === ConnectionStatus.CONNECTED) {
-                logger.info("Already connected for this API key");
-                return existing.status;
-            }
 
 
-            if (existing && existing.socket) {
-                this.cleanupEventListeners(existing.socket);
-                if (existing.timeout) clearTimeout(existing.timeout);
-                await existing.socket.logout();
-            }
-
-            const retries = existing ? existing.retries : 0;
-            const session = await Session.findOne({ id: sessionId });
-            if (!session) {
-                return null;
-            }
-
-            const { state, saveCreds } = await useNoSQLAuthState(session.phoneNumber);
-            const socket = makeWASocket({
-                version: latestVersion,
-                auth: state,
-                logger: waLogger
-            });
-
-            const stateInfo: ClientStateInfo = {
-                socket,
-                phoneNumber: session.phoneNumber,
-                status: ConnectionStatus.DISCONNECTED,
-                isPairingReady: false,
-                qr: null,
-                retries
-            }
-
-            this.registerConnectionHandler(stateInfo, sessionId);
-            socket.ev.on('creds.update', saveCreds);
-            this.registerMessageHandler(stateInfo, sessionId);
-            this.registerMessageUpdateHandler(stateInfo, sessionId);
-            this.sockets.set(sessionId, stateInfo);
-            return stateInfo.status;
-        } finally {
-            promiseResolve();
-            this.isConnecting.delete(sessionId);
+        if (this.socket) {
+            this.cleanupEventListeners();
+            if (this.timeout) clearTimeout(this.timeout);
+            await this.socket.logout();
         }
+
+        const { state, saveCreds } = await useNoSQLAuthState(this.phoneNumber);
+        this.socket = makeWASocket({
+            version: latestVersion,
+            auth: state,
+            logger: waLogger
+        });
+
+        this.registerConnectionHandler();
+        this.socket.ev.on('creds.update', saveCreds);
+        this.registerMessageHandler();
+        this.registerMessageUpdateHandler();
+        return ConnectionStatus.DISCONNECTED;
+
     }
 
-    private cleanupEventListeners(socket: ReturnType<typeof makeWASocket>) {
-        socket?.ev.removeAllListeners('connection.update');
-        socket?.ev.removeAllListeners('messages.upsert');
-        socket?.ev.removeAllListeners('message-receipt.update');
-        socket?.ev.removeAllListeners('creds.update');
+    private cleanupEventListeners() {
+        this.socket?.ev.removeAllListeners('connection.update');
+        this.socket?.ev.removeAllListeners('messages.upsert');
+        this.socket?.ev.removeAllListeners('message-receipt.update');
+        this.socket?.ev.removeAllListeners('creds.update');
     }
 
-    async disconnect(sessionId: string) {
-        try {
-            const stateInfo = this.sockets.get(sessionId);
-            if (!stateInfo) throw new SessionNotFoundError(sessionId);
-            if (stateInfo.timeout) {
-                clearTimeout(stateInfo.timeout);
-            }
-            if (stateInfo.socket) {
-                this.cleanupEventListeners(stateInfo.socket);
-                await stateInfo.socket.logout().catch((err) => logger.error(err));
-            }
-            const status = await this.clearSession(sessionId);
-            return status;
-        } finally {
-            this.sockets.delete(sessionId);
+    async disconnect() {
+        const socket = this.socket;
+        if (!socket) throw new SessionNotFoundError('0');
+        if (this.timeout) {
+            clearTimeout(this.timeout);
         }
-    }
-
-    async clearAll() {
-        for (const stateInfo of this.sockets.values()) {
-            if (stateInfo.timeout) {
-                clearTimeout(stateInfo.timeout);
-            }
-            if (stateInfo.socket) {
-                this.cleanupEventListeners(stateInfo.socket);
-                stateInfo.socket.end(undefined);
-            }
+        if (socket) {
+            this.cleanupEventListeners();
+            await socket.logout().catch((err) => logger.error(err));
         }
-        this.sockets.clear();
         return true;
     }
 
-    private async ensureSendable(sessionId: string) {
-        const stateInfo = this.sockets.get(sessionId);
-        if (!stateInfo) throw new SessionNotFoundError(sessionId);
+    clear() {
+        if (this.timeout) {
+            clearTimeout(this.timeout);
+        }
+        if (this.socket) {
+            this.cleanupEventListeners();
+            this.socket.end(undefined);
+        }
 
-        const { status, socket } = stateInfo;
-        if (status !== ConnectionStatus.CONNECTED) throw new NotConnectedError(sessionId, status);
-        if (!socket) throw new NotConnectedError(sessionId, status);
+    }
 
-        // const onWhatsapp = await this.isOnWhatsapp(apiKey, phoneNumber);
-        // if (!onWhatsapp) throw new RecipientNotOnWhatsappError(apiKey, phoneNumber);
+
+    private async ensureSendable() {
+        const { status, socket } = this;
+        if (status !== ConnectionStatus.CONNECTED) throw new NotConnectedError('0', status);
+        if (!socket) throw new NotConnectedError('0', status);
+
+        // const onWhatsapp = await this.isOnWhatsapp(phoneNumber);
+        // if (!onWhatsapp) throw new RecipientNotOnWhatsappError('0', phoneNumber);
 
         return socket;
     }
 
-    private ensureMessageKeyExists(sessionId: string, messageKey: WAMessageKey) {
-        const socket = this.getSocket(sessionId);
-        if (!socket) throw new SessionNotFoundError(sessionId);
-        if (!messageKey.remoteJid) throw new InvalidMessageKeyError(sessionId);
+    private ensureMessageKeyExists(messageKey: WAMessageKey) {
+        const socket = this.socket;
+        if (!socket) throw new SessionNotFoundError('0');
+        if (!messageKey.remoteJid) throw new InvalidMessageKeyError('0');
         return { socket, messageKey };
     }
 
-    async sendTyping(sessionId: string, phoneNumber: string) {
-        const socket = await this.ensureSendable(sessionId);
+    async sendTyping(phoneNumber: string) {
+        const socket = await this.ensureSendable();
         await socket.sendPresenceUpdate('composing', formatJid(phoneNumber));
         return true;
     }
 
-    async sendMessage(sessionId: string, phoneNumber: string, msgText: string) {
-        const socket = await this.ensureSendable(sessionId);
+    async sendMessage(phoneNumber: string, msgText: string) {
+        const socket = await this.ensureSendable();
         const message = await socket.sendMessage(formatJid(phoneNumber), {
             text: msgText
         });
@@ -338,13 +261,13 @@ class WhatsappService {
     }
 
 
-    async sendMediaMessage(sessionId: string, phoneNumber: string, mediaType: string, mediaUrl: string, caption?: string) {
-        const socket = await this.ensureSendable(sessionId);
+    async sendMediaMessage(phoneNumber: string, mediaType: string, mediaUrl: string, caption?: string) {
+        const socket = await this.ensureSendable();
 
         // SSRF guard: validate the URL before Baileys fetches it server-side
         const validated = await validateMediaUrl(mediaUrl);
         if (!validated) {
-            throw new SsrfBlockedUrlError(sessionId);
+            throw new SsrfBlockedUrlError('0');
         }
 
         const messageOptions: AnyMediaMessageContent = this.buildMediaOptions(mediaType, 'url', mediaUrl, caption);
@@ -352,18 +275,18 @@ class WhatsappService {
         return message;
     }
 
-    async sendMediaFile(sessionId: string, phoneNumber: string, file: Express.Multer.File, caption?: string) {
-        const socket = await this.ensureSendable(sessionId);
+    async sendMediaFile(phoneNumber: string, file: Express.Multer.File, caption?: string) {
+        const socket = await this.ensureSendable();
         const type = getMimeTypeGroup(file.mimetype);
         const messageOptions: AnyMediaMessageContent = this.buildMediaOptions(type, 'file', file.buffer, caption, file.originalname);
         const message = await socket.sendMessage(formatJid(phoneNumber), messageOptions);
         return message;
     }
 
-    async sendVoiceNote(sessionId: string, phoneNumber: string, file: Express.Multer.File) {
-        const socket = await this.ensureSendable(sessionId);
+    async sendVoiceNote(phoneNumber: string, file: Express.Multer.File) {
+        const socket = await this.ensureSendable();
         const type = getMimeTypeGroup(file.mimetype);
-        if (type !== "audio") throw new UnsupportedMediaTypeError(sessionId, file.mimetype);
+        if (type !== "audio") throw new UnsupportedMediaTypeError('0', file.mimetype);
 
         const messageOptions: AnyMediaMessageContent = {
             audio: file.buffer,
@@ -377,30 +300,30 @@ class WhatsappService {
 
 
 
-    async isOnWhatsapp(sessionId: string, phoneNumber: string) {
-        const socket = this.getSocket(sessionId);
-        if (!socket) throw new SessionNotFoundError(sessionId);
+    async isOnWhatsapp(phoneNumber: string) {
+        const socket = this.socket;
+        if (!socket) throw new SessionNotFoundError('0');
 
         const isWhatsappAvailable = await socket.onWhatsApp(phoneNumber);
         return isWhatsappAvailable?.[0]?.exists;
     }
 
-    async deleteMessage(sessionId: string, msgKey: WAMessageKey) {
-        const { socket, messageKey } = this.ensureMessageKeyExists(sessionId, msgKey);
+    async deleteMessage(msgKey: WAMessageKey) {
+        const { socket, messageKey } = this.ensureMessageKeyExists(msgKey);
         await socket.sendMessage(messageKey.remoteJid!, {
             delete: messageKey
         });
         return true;
     }
 
-    async readMessage(sessionId: string, msgKey: WAMessageKey) {
-        const { socket, messageKey } = this.ensureMessageKeyExists(sessionId, msgKey);
+    async readMessage(msgKey: WAMessageKey) {
+        const { socket, messageKey } = this.ensureMessageKeyExists(msgKey);
         await socket.readMessages([messageKey]);
         return true;
     }
 
-    async reactMessage(sessionId: string, msgKey: WAMessageKey, emoji: string) {
-        const { socket, messageKey } = this.ensureMessageKeyExists(sessionId, msgKey);
+    async reactMessage(msgKey: WAMessageKey, emoji: string) {
+        const { socket, messageKey } = this.ensureMessageKeyExists(msgKey);
         await socket.sendMessage(messageKey.remoteJid!, {
             react: {
                 text: emoji,
@@ -410,5 +333,3 @@ class WhatsappService {
         return true;
     }
 }
-
-export const whatsappService = new WhatsappService();

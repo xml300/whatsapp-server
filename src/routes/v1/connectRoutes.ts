@@ -1,6 +1,6 @@
 import express from "express";
 import { Users } from "../../data/models/users.js";
-import { whatsappService } from "../../lib/whatsapp.js";
+import { whatsappService } from "../../lib/whatsapp-manager.js";
 import authMiddleware from "../../middleware/auth.js";
 import { Session } from "../../data/db.js";
 import { createHash } from "crypto";
@@ -29,14 +29,21 @@ router.post('/', authMiddleware, validate({
             message: 'Service already connected'
         });
     }
+    const session = await Session.findOne({id: sessionId});
+    if(!session){
+        return res.status(404).json({
+            success: false,
+            error: {
+                code: 400,
+                message: "Session not found."
+            }
+        })
+    }
 
 
     const status = await whatsappService.connect(sessionId);
-    const session = await Session.create({
-        id: createHash('sha256').update(userId + phoneNumber).digest('hex'),
-        userId,
-        phoneNumber
-    });
+    
+
     return res.json({
         success: true,
         data: {

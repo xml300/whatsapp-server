@@ -1,5 +1,5 @@
 import express from "express";
-import { whatsappService } from "../../lib/whatsapp.js";
+import { whatsappService } from "../../lib/whatsapp-manager.js";
 import multer from "multer";
 import authMiddleware from "../../middleware/auth.js";
 import { logger } from "../../lib/logger.js";

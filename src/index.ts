@@ -7,7 +7,7 @@ import { loggingMiddleware } from "./middleware/logging.js";
 import { logger } from "./lib/logger.js"; 
 import errorMiddleware from "./middleware/error.js";
 import cookieParser from "cookie-parser";
-import { whatsappService } from "./lib/whatsapp.js";
+import { whatsappService } from "./lib/whatsapp-manager.js";
 import { handleShutdown, handleStartup } from "./utils/server.js"; 
 
 const app = express();

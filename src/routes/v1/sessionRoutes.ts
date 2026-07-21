@@ -1,6 +1,6 @@
 import express from "express";
 import userAuthMiddleware from "../../middleware/user-auth.js";
-import { Session } from "../../data/db.js";
+import { PhoneNumber, Session } from "../../data/db.js";
 import validate from "../../middleware/validate.js";
 import { createHash } from "crypto";
 
@@ -9,7 +9,7 @@ router.use(userAuthMiddleware);
 
 router.get("/", async (req, res) => {
     const userId = res.locals.userId;
-    const sessions = await Session.findOne({ userId: userId });
+    const sessions = await Session.find({ userId: userId });
     return res.json({
         success: true,
         data: {
@@ -25,6 +25,10 @@ router.post("/", validate({
 }), async (req, res) => {
     const { phoneNumber } = req.body;
     const userId = res.locals.userId;
+    await PhoneNumber.create({
+        userId: userId,
+        phoneNumber: phoneNumber
+    });
     const session = await Session.create({
         id: createHash('sha256').update(userId + phoneNumber).digest('hex'),
         userId,

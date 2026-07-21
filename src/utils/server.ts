@@ -1,5 +1,5 @@
 import { writeFile, readFile, unlink } from "fs/promises";
-import { whatsappService } from "../lib/whatsapp.js";
+import { whatsappService } from "../lib/whatsapp-manager.js";
 import { mkdirSync } from "fs";
 import { logBuffer } from "../lib/logger.js";
 import { Log } from "../data/db.js";
