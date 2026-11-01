@@ -18,14 +18,36 @@ router.post('/', authMiddleware, validate({
     const userId = res.locals.userId;
     const hasNumber = await Users.hasPhoneNumber(userId, phoneNumber);
     if (!hasNumber) {
-        return res.status(401).json({
+        return res.status(403).json({
             success: false,
             error: {
-                code: 401,
-                message: 'Number not registered'
+                code: 403,
+                message: 'Number not registered for this user'
             }
         });
     }
+
+    const session = await Session.findOne({ id: sessionId, userId });
+    if (!session) {
+        return res.status(404).json({
+            success: false,
+            error: {
+                code: 404,
+                message: "Session not found"
+            }
+        });
+    }
+
+    if (session.phoneNumber !== phoneNumber) {
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 400,
+                message: "Session phone number mismatch"
+            }
+        });
+    }
+
     if (whatsappService.isConnected(sessionId)) {
         return res.status(400).json({
             success: false,
@@ -35,20 +57,8 @@ router.post('/', authMiddleware, validate({
             }
         });
     }
-    const session = await Session.findOne({id: sessionId});
-    if(!session){
-        return res.status(404).json({
-            success: false,
-            error: {
-                code: 400,
-                message: "Session not found."
-            }
-        })
-    }
-
 
     const status = await whatsappService.connect(sessionId);
-    
 
     return res.json({
         success: true,
@@ -61,11 +71,15 @@ router.post('/', authMiddleware, validate({
 
 router.get('/:sessionId/status', authMiddleware, async (req, res) => {
     const sessionId = req.params.sessionId as string;
-    const session = await Session.findOne({ id: sessionId });
+    const userId = res.locals.userId;
+    const session = await Session.findOne({ id: sessionId, userId });
     if (!session) {
         return res.status(404).json({
-            code: 404,
-            message: 'Session not found'
+            success: false,
+            error: {
+                code: 404,
+                message: 'Session not found'
+            }
         });
     }
     const isConnected = whatsappService.isConnected(sessionId);
@@ -78,11 +92,15 @@ router.get('/:sessionId/status', authMiddleware, async (req, res) => {
 
 router.get('/:sessionId/qr', authMiddleware, async (req, res) => {
     const sessionId = req.params.sessionId as string;
-    const session = await Session.findOne({ id: sessionId });
+    const userId = res.locals.userId;
+    const session = await Session.findOne({ id: sessionId, userId });
     if (!session) {
         return res.status(404).json({
-            code: 404,
-            message: 'Session not found'
+            success: false,
+            error: {
+                code: 404,
+                message: 'Session not found'
+            }
         });
     }
     const qr = whatsappService.getQrCode(sessionId);
@@ -94,11 +112,15 @@ router.get('/:sessionId/qr', authMiddleware, async (req, res) => {
 
 router.get('/:sessionId/pairing-code', authMiddleware, async (req, res) => {
     const sessionId = req.params.sessionId as string;
-    const session = await Session.findOne({ id: sessionId });
+    const userId = res.locals.userId;
+    const session = await Session.findOne({ id: sessionId, userId });
     if (!session) {
         return res.status(404).json({
-            code: 404,
-            message: 'Session not found'
+            success: false,
+            error: {
+                code: 404,
+                message: 'Session not found'
+            }
         });
     }
     const pairingCode = await whatsappService.getPairingCode(sessionId);
@@ -110,11 +132,15 @@ router.get('/:sessionId/pairing-code', authMiddleware, async (req, res) => {
 
 router.post('/:sessionId/end', authMiddleware, async (req, res) => {
     const sessionId = req.params.sessionId as string;
-    const session = await Session.findOne({ id: sessionId });
+    const userId = res.locals.userId;
+    const session = await Session.findOne({ id: sessionId, userId });
     if (!session) {
         return res.status(404).json({
-            code: 404,
-            message: 'Session not found'
+            success: false,
+            error: {
+                code: 404,
+                message: 'Session not found'
+            }
         });
     }
     const status = await whatsappService.disconnect(sessionId);

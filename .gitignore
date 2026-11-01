@@ -1,7 +1,7 @@
 auth/
 auth_info_folder/
 node_modules/
-data/
+/data/
 
 .env
 *.log

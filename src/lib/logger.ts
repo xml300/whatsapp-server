@@ -3,6 +3,9 @@ import { Log } from "../data/db.js";
 type LogLevel = "INFO" | "DEBUG" | "ERROR" | "WARN";
 
 export const logBuffer: any[] = [];
+const MAX_BUFFER_SIZE = 500;
+const BATCH_SIZE = 50;
+let isFlushing = false;
 
 const colors = {
     reset: "\x1b[0m",
@@ -23,19 +26,30 @@ function colorForLevel(level: LogLevel): string {
     }
 }
 
+async function flushBuffer() {
+    if (isFlushing || logBuffer.length === 0) return;
+    isFlushing = true;
+    const batch = logBuffer.splice(0, BATCH_SIZE);
+    try {
+        await Log.insertMany(batch);
+    } catch (dbErr) {
+        console.error(`${colors.red}[LOGGER ERROR] Failed to save log to DB:${colors.reset}`, dbErr);
+        // Re-queue at the front only if buffer is within bounds
+        if (logBuffer.length + batch.length <= MAX_BUFFER_SIZE) {
+            logBuffer.unshift(...batch);
+        } else {
+            console.error(`${colors.yellow}[LOGGER WARN] Dropping ${batch.length} logs to prevent memory overflow${colors.reset}`);
+        }
+    } finally {
+        isFlushing = false;
+    }
+}
+
 async function log(msg: any, level: LogLevel, source?: string) {
     const id = globalThis.crypto.randomUUID();
     const timestamp = new Date().toISOString();
     const message = typeof msg === "string" ? msg : JSON.stringify(msg);
 
-    if (logBuffer.length > 50) {
-        try {
-            await Log.insertMany(logBuffer);
-            logBuffer.length = 0;
-        } catch (dbErr) {
-            console.error(`${colors.red}[LOGGER ERROR] Failed to save log to DB:${colors.reset}`, dbErr);
-        }
-    }
     logBuffer.push({
         id: id,
         message: message,
@@ -44,6 +58,14 @@ async function log(msg: any, level: LogLevel, source?: string) {
         source: source || "system"
     });
 
+    if (logBuffer.length > MAX_BUFFER_SIZE) {
+        // Drop oldest entries beyond maximum buffer limit
+        logBuffer.splice(0, logBuffer.length - MAX_BUFFER_SIZE);
+    }
+
+    if (logBuffer.length >= BATCH_SIZE && !isFlushing) {
+        flushBuffer().catch(() => {});
+    }
 
     const levelColor = colorForLevel(level);
     const sourceTag = `${colors.dim}[${source || "system"}]${colors.reset} `;

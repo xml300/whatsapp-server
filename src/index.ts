@@ -2,12 +2,12 @@ import "dotenv/config";
 
 import express from "express";
 import cors from "cors"; 
+import platformRoutes from "./routes/platform/_indexRoutes.js";
 import v1Routes from "./routes/v1/_indexRoutes.js";
 import { loggingMiddleware } from "./middleware/logging.js";
 import { logger } from "./lib/logger.js"; 
 import errorMiddleware from "./middleware/error.js";
 import cookieParser from "cookie-parser";
-import { whatsappService } from "./lib/whatsapp-manager.js";
 import { handleShutdown, handleStartup } from "./utils/server.js"; 
 
 const app = express();
@@ -25,17 +25,7 @@ app.use(cors({
 }));
 
 
-app.get('/api/health', (req, res) => {
-    logger.info("Health route hit!");
-    res.json({
-        success: true,
-        data: { 
-            ok: true,
-            activeSessions: whatsappService.getActiveSessions()
-        }
-    });
-});
-
+app.use('/api', platformRoutes);
 app.use('/api/v1', v1Routes);
 
 app.use(errorMiddleware);

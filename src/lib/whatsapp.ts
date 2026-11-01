@@ -11,6 +11,7 @@ import { InvalidMessageKeyError, NotConnectedError, RecipientNotOnWhatsappError,
 import { clearUserKeys } from "../data/queries.js";
 import { validateMediaUrl } from "../utils/url.js";
 import { Session } from "../data/db.js";
+import { Events } from "../data/models/events.js";
 
 const logger = nameLogger("WhatsappService");
 const waLogger = pino(pino.destination("./server.log"));
@@ -36,17 +37,21 @@ export class WhatsappService {
 
     private socket: ReturnType<typeof makeWASocket> | null;
     private phoneNumber: string;
+    private sessionId: string;
+    private userId: string;
     private status: ConnectionStatus;
     private isPairingReady: boolean;
     private qr: string | null;
     private retries: number;
     private timeout?: NodeJS.Timeout;
 
-    constructor(phoneNumber: string) {
+    constructor(phoneNumber: string, sessionId: string = "", userId: string = "") {
         this.emitter = new EventEmitter();
 
         this.socket = null;
         this.phoneNumber = phoneNumber;
+        this.sessionId = sessionId;
+        this.userId = userId;
         this.status = ConnectionStatus.DISCONNECTED;
         this.isPairingReady = false;
         this.qr = null;
@@ -60,24 +65,60 @@ export class WhatsappService {
             if (qr) {
                 this.isPairingReady = true;
                 this.qr = qr;
+                if (this.userId && this.sessionId) {
+                    Events.create({
+                        userId: this.userId,
+                        sessionId: this.sessionId,
+                        eventType: "qr",
+                        payload: { qr }
+                    }).catch((err) => logger.error(`Failed to store qr event: ${err}`));
+                }
+                this.emit('qr', this.sessionId || '0', qr);
             }
             if (connection === 'close') {
                 const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
                 this.status = ConnectionStatus.DISCONNECTED;
+                if (this.userId && this.sessionId) {
+                    Events.create({
+                        userId: this.userId,
+                        sessionId: this.sessionId,
+                        eventType: "connection",
+                        payload: {
+                            status: ConnectionStatus.DISCONNECTED,
+                            statusCode,
+                            reason: (lastDisconnect?.error as Boom)?.message || "Connection closed"
+                        }
+                    }).catch((err) => logger.error(`Failed to store disconnected event: ${err}`));
+                }
+                this.emit('disconnected', this.sessionId || '0', (lastDisconnect?.error as Boom)?.message || "Connection closed");
                 if (shouldReconnect && this.retries < 5) {
                     logger.info("Connection closed. Reconnecting...");
                     this.retries = this.retries + 1;
-                    const timeout = setTimeout(() => this.connect(), 5000 * this.retries);
+                    const timeout = setTimeout(() => this.connect().catch((err) => logger.error(`Reconnection error: ${err}`)), 5000 * this.retries);
                     if (this.timeout) clearTimeout(this.timeout);
                     this.timeout = timeout;
+                } else if (statusCode === DisconnectReason.loggedOut) {
+                    logger.info("Session logged out by WhatsApp. Clearing credentials...");
+                    await clearUserKeys(this.phoneNumber);
                 } else {
                     logger.info("Connection closed. Not reconnecting...");
                 }
             } else if (connection === 'open') {
                 logger.info("✅ WhatsApp is connected!");
                 this.status = ConnectionStatus.CONNECTED;
-                this.emit('connected', '0');
+                if (this.userId && this.sessionId) {
+                    Events.create({
+                        userId: this.userId,
+                        sessionId: this.sessionId,
+                        eventType: "connection",
+                        payload: {
+                            status: ConnectionStatus.CONNECTED,
+                            phoneNumber: this.phoneNumber
+                        }
+                    }).catch((err) => logger.error(`Failed to store connected event: ${err}`));
+                }
+                this.emit('connected', this.sessionId || '0');
                 this.retries = 0;
             }
         });
@@ -90,15 +131,39 @@ export class WhatsappService {
             }
 
             for (const message of messages) {
-                this.emit('message', '0', message);
+                if (this.userId && this.sessionId) {
+                    try {
+                        await Events.create({
+                            userId: this.userId,
+                            sessionId: this.sessionId,
+                            eventType: "message",
+                            payload: message
+                        });
+                    } catch (err) {
+                        logger.error(`Failed to store message event: ${err}`);
+                    }
+                }
+                this.emit('message', this.sessionId || '0', message);
             }
         });
     }
 
     private registerMessageUpdateHandler() {
-        this.socket?.ev.on('message-receipt.update', (updates) => {
+        this.socket?.ev.on('message-receipt.update', async (updates) => {
             for (const update of updates) {
-                this.emit('message.update', '0', update);
+                if (this.userId && this.sessionId) {
+                    try {
+                        await Events.create({
+                            userId: this.userId,
+                            sessionId: this.sessionId,
+                            eventType: "message.update",
+                            payload: update
+                        });
+                    } catch (err) {
+                        logger.error(`Failed to store message.update event: ${err}`);
+                    }
+                }
+                this.emit('message.update', this.sessionId || '0', update);
             }
         });
     }
@@ -138,33 +203,60 @@ export class WhatsappService {
         return await socket.requestPairingCode(this.phoneNumber);
     }
 
-    async connect() {
+    async connect(): Promise<ConnectionStatus> {
         // Already connected — idempotent, no-op
         if (this.status === ConnectionStatus.CONNECTED) {
-            logger.info("Already connected for this API key");
+            logger.info("Already connected for this session");
             return this.status;
         }
-
 
         if (this.socket) {
             this.cleanupEventListeners();
             if (this.timeout) clearTimeout(this.timeout);
-            await this.socket.logout();
+            this.socket.end(undefined);
+            this.socket = null;
         }
 
         const { state, saveCreds } = await useNoSQLAuthState(this.phoneNumber);
-        this.socket = makeWASocket({
+        const socket = makeWASocket({
             version: latestVersion,
             auth: state,
             logger: waLogger
         });
+        this.socket = socket;
 
         this.registerConnectionHandler();
-        this.socket.ev.on('creds.update', saveCreds);
+        socket.ev.on('creds.update', saveCreds);
         this.registerMessageHandler();
         this.registerMessageUpdateHandler();
-        return ConnectionStatus.DISCONNECTED;
 
+        // Wait for initial connection resolution (open, qr, close, or timeout)
+        return new Promise<ConnectionStatus>((resolve) => {
+            let resolved = false;
+            const finish = (status: ConnectionStatus) => {
+                if (!resolved) {
+                    resolved = true;
+                    clearTimeout(timer);
+                    resolve(status);
+                }
+            };
+
+            const timer = setTimeout(() => {
+                finish(this.status);
+            }, 15000);
+
+            const initialHandler = (update: any) => {
+                if (update.qr) {
+                    finish(ConnectionStatus.DISCONNECTED);
+                } else if (update.connection === 'open') {
+                    finish(ConnectionStatus.CONNECTED);
+                } else if (update.connection === 'close') {
+                    finish(ConnectionStatus.DISCONNECTED);
+                }
+            };
+
+            socket.ev.on('connection.update', initialHandler);
+        });
     }
 
     private cleanupEventListeners() {
@@ -180,10 +272,12 @@ export class WhatsappService {
         if (this.timeout) {
             clearTimeout(this.timeout);
         }
-        if (socket) {
-            this.cleanupEventListeners();
-            await socket.logout().catch((err) => logger.error(err));
-        }
+        this.cleanupEventListeners();
+        socket.end(undefined);
+        this.socket = null;
+        this.status = ConnectionStatus.DISCONNECTED;
+        this.isPairingReady = false;
+        this.qr = null;
         return true;
     }
 

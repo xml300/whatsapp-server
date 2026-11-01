@@ -24,3 +24,12 @@ export interface ISession {
     userId: string,
     phoneNumber: string
 };
+
+export interface IEvent {
+    _id?: string | undefined;
+    userId: string;
+    sessionId: string;
+    eventType: string;
+    payload: any;
+    createdAt?: Date | undefined;
+}

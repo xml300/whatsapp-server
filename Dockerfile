@@ -27,7 +27,7 @@ ENV PORT=3000
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 
-RUN touch server.log && chown appuser:appgroup server.log
+RUN mkdir -p /app/data && touch server.log && chown -R appuser:appgroup /app/data server.log
 USER appuser
 
 EXPOSE 3000

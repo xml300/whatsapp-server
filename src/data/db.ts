@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import "dotenv/config";
 import { logger } from "../lib/logger.js";
-import type { IApiKey, IPhoneNumber, ISession, IUser } from "../types/models.js";
+import type { IApiKey, IEvent, IPhoneNumber, ISession, IUser } from "../types/models.js";
 
 const DATABASE_URL = process.env.MONGODB_URL;
 
@@ -96,6 +96,35 @@ const sessionSchema = new mongoose.Schema<ISession>({
     }
 });
 
+const eventSchema = new mongoose.Schema<IEvent>({
+    userId: {
+        type: String,
+        required: true,
+        index: true
+    },
+    sessionId: {
+        type: String,
+        required: true,
+        index: true
+    },
+    eventType: {
+        type: String,
+        required: true,
+        index: true
+    },
+    payload: {
+        type: mongoose.Schema.Types.Mixed,
+        required: true
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now
+    }
+});
+
+eventSchema.index({ userId: 1, _id: 1 });
+eventSchema.index({ userId: 1, sessionId: 1, _id: 1 });
+eventSchema.index({ createdAt: 1 }, { expireAfterSeconds: 259200 }); // 3 days TTL
 
 export const User = mongoose.model<IUser>("User", userSchema);
 export const ApiKey = mongoose.model<IApiKey>("ApiKey", apiKeySchema);
@@ -104,3 +133,4 @@ export const Credential = mongoose.model("Credential", credentialSchema);
 export const KeyStore = mongoose.model("KeyStore", keyStoreSchema);
 export const Log = mongoose.model("Log", logSchema);
 export const Session = mongoose.model<ISession>("Session", sessionSchema);
+export const Event = mongoose.model<IEvent>("Event", eventSchema);

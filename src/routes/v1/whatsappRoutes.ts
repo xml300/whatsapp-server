@@ -4,43 +4,88 @@ import multer from "multer";
 import authMiddleware from "../../middleware/auth.js";
 import { logger } from "../../lib/logger.js";
 import validate from "../../middleware/validate.js";
+import { Session } from "../../data/db.js";
+import { Events } from "../../data/models/events.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const router = express.Router();
 router.use(authMiddleware);
 
-router.get('/stream', (req, res) => {
-    res.writeHead(200, {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-        'connection': 'keep-alive'
+router.get('/events', async (req, res) => {
+    const userId = res.locals.userId;
+    const { sessionId, eventType, after, limit } = req.query;
+
+    if (sessionId) {
+        const session = await Session.findOne({ id: sessionId as string, userId });
+        if (!session) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 404,
+                    message: "Session not found"
+                }
+            });
+        }
+    }
+
+    const parsedLimit = limit ? parseInt(limit as string, 10) : 50;
+
+    const result = await Events.getEvents({
+        userId,
+        sessionId: sessionId as string | undefined,
+        eventType: eventType as string | undefined,
+        after: after as string | undefined,
+        limit: isNaN(parsedLimit) ? 50 : parsedLimit
     });
 
-    res.write(`data: {"status": "connected"}\n\n`);
+    return res.json({
+        success: true,
+        data: result
+    });
+});
 
-    const messageListener = (apiKey: string, message: any) => {
-        if (apiKey !== res.locals.apiKey) {
-            return;
-        }
-        res.write(`event:message\ndata: ${JSON.stringify(message)}\n\n`);
+router.delete('/events', async (req, res) => {
+    const userId = res.locals.userId;
+    const sessionId = req.query.sessionId as string;
+
+    if (!sessionId) {
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 400,
+                message: "sessionId query parameter is required"
+            }
+        });
     }
 
-    const updateListener = (apiKey: string, update: any) => {
-        if (apiKey !== res.locals.apiKey) {
-            return;
-        }
-        // res.write(`event:message-update\ndata: ${JSON.stringify(update)}\n\n`);
+    const session = await Session.findOne({ id: sessionId, userId });
+    if (!session) {
+        return res.status(404).json({
+            success: false,
+            error: {
+                code: 404,
+                message: "Session not found"
+            }
+        });
     }
 
-    whatsappService.on('message', messageListener);
-    whatsappService.on('message.update', updateListener);
+    const result = await Events.clearEventsForSession(userId, sessionId);
+    return res.json({
+        success: true,
+        data: {
+            deletedCount: result.deletedCount
+        }
+    });
+});
 
-    req.on('close', () => {
-        logger.info('Client disconnected');
-        whatsappService.off('message', messageListener);
-        whatsappService.off('message.update', updateListener);
-        res.end();
-    })
+router.get('/stream', (req, res) => {
+    return res.status(410).json({
+        success: false,
+        error: {
+            code: 410,
+            message: "SSE stream has been retired. Please use event polling at GET /api/v1/events"
+        }
+    });
 });
 
 router.post('/send/typing', validate({
@@ -50,6 +95,18 @@ router.post('/send/typing', validate({
     }
 }), async (req, res) => {
     const { sessionId, phoneNumber } = req.body;
+    const userId = res.locals.userId;
+    const session = await Session.findOne({ id: sessionId, userId });
+    if (!session) {
+        return res.status(404).json({
+            success: false,
+            error: {
+                code: 404,
+                message: "Session not found"
+            }
+        });
+    }
+
     const success = await whatsappService.sendTyping(sessionId, phoneNumber);
 
     if (!success) {
@@ -76,6 +133,18 @@ router.post('/send/text', validate({
     }
 }), async (req, res) => {
     const { sessionId, phoneNumber, message } = req.body;
+    const userId = res.locals.userId;
+    const session = await Session.findOne({ id: sessionId, userId });
+    if (!session) {
+        return res.status(404).json({
+            success: false,
+            error: {
+                code: 404,
+                message: "Session not found"
+            }
+        });
+    }
+
     const success = await whatsappService.sendMessage(sessionId, phoneNumber, message);
     if (!success) {
         return res.status(400).json({
@@ -101,6 +170,18 @@ router.post('/send/file', upload.single('file'), validate({
     file: "required|file"
 }), async (req, res) => {
     const { sessionId, phoneNumber, caption } = req.body;
+    const userId = res.locals.userId;
+    const session = await Session.findOne({ id: sessionId, userId });
+    if (!session) {
+        return res.status(404).json({
+            success: false,
+            error: {
+                code: 404,
+                message: "Session not found"
+            }
+        });
+    }
+
     const file = req.file!;
     logger.info({ body: req.body, file: req.file?.originalname });
     const success = await whatsappService.sendMediaFile(sessionId, phoneNumber, file, caption);

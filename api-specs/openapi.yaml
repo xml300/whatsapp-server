@@ -1,24 +1,210 @@
-openapi: 3.0.0
+openapi: 3.0.3
 info:
-  title: WhatsApp API Server
+  title: WhatsApp Gateway Server API
   version: 1.0.0
-  description: API server for interacting with WhatsApp Web services
+  description: |
+    Production REST API server for multi-session WhatsApp Web automation, connection management,
+    message dispatch, media transfer, and real-time Server-Sent Events (SSE) message streaming.
 servers:
-  - url: /api/v1
-    description: API v1 Base URL
+  - url: /
+    description: Root Server URL
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: API Key authentication header for WhatsApp connection and messaging endpoints.
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: auth_token
+      description: JWT cookie authentication for administrative user, session, and API key management endpoints.
+
+  schemas:
+    StandardSuccessResponse:
+      type: object
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          description: Response payload
+
+    StandardErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: integer
+              example: 400
+            message:
+              type: string
+              example: "Invalid request payload or missing required parameter"
+
+    UserResponse:
+      type: object
+      properties:
+        username:
+          type: string
+          example: "john_doe"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-08-16T12:00:00.000Z"
+
+    ApiKeyItem:
+      type: object
+      properties:
+        _id:
+          type: string
+          example: "64f8a1b2c3d4e5f6a7b8c9d0"
+        userId:
+          type: string
+          example: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+        apiKey:
+          type: string
+          format: uuid
+          example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SessionItem:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "d41d8cd98f00b204e9800998ecf8427e"
+        userId:
+          type: string
+          example: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+        phoneNumber:
+          type: string
+          example: "2348012345678"
+
+    LogItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        source:
+          type: string
+          example: "HTTP_SERVER"
+        message:
+          type: string
+          example: "[GET] /api/v1/sessions - 200 OK"
+        level:
+          type: string
+          enum: [INFO, DEBUG, ERROR, WARN]
+          example: "INFO"
+        timestamp:
+          type: string
+          format: date-time
+
 paths:
-  /health:
+  /api/health:
     get:
-      summary: Health check endpoint
-      servers:
-        - url: /api
-          description: API Health URL
+      summary: Server Health & Active Sessions Check
+      description: Returns health status and a list of currently active WhatsApp session IDs.
       responses:
         '200':
-          description: Returns ok.
-  /auth/register:
+          description: Server is operational.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                        example: true
+                      activeSessions:
+                        type: array
+                        items:
+                          type: string
+                        example: ["d41d8cd98f00b204e9800998ecf8427e"]
+
+  /api/logs:
+    get:
+      summary: Retrieve Paginated Application Logs
+      description: Fetches persisted application logs from MongoDB with pagination metadata.
+      security:
+        - CookieAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+          description: Page number
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+          description: Number of log items per page
+      responses:
+        '200':
+          description: Paginated logs retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LogItem'
+                  meta:
+                    type: object
+                    properties:
+                      totalPages:
+                        type: integer
+                        example: 5
+                      currentPage:
+                        type: integer
+                        example: 1
+                      logsPerPage:
+                        type: integer
+                        example: 100
+                      totalLogs:
+                        type: integer
+                        example: 450
+        '500':
+          description: Internal server error while reading logs.
+
+  /api/auth/register:
     post:
-      summary: Register a new user
+      summary: Register User
+      description: Registers a new administrative user and sets an HTTP-only JWT `auth_token` cookie.
       requestBody:
         required: true
         content:
@@ -26,67 +212,178 @@ paths:
             schema:
               type: object
               required:
-                - phoneNumber
                 - username
                 - password
               properties:
-                phoneNumber:
-                  type: string
-                  description: User's phone number
                 username:
                   type: string
-                  description: Username for registration
+                  example: "admin_user"
                 password:
                   type: string
-                  description: Password for registration
+                  format: password
+                  example: "securePassword123"
       responses:
         '200':
-          description: User registered successfully
-  /auth/connect:
+          description: User registered successfully. `auth_token` cookie set.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: "auth_token=eyJhbGciOiJIUzI1Ni...; Path=/; HttpOnly"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Missing or invalid username/password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+        '500':
+          description: User already exists or database failure.
+
+  /api/auth/login:
     post:
-      summary: Connect to WhatsApp
-      security:
-        - ApiKeyAuth: []
+      summary: Login User
+      description: Authenticates user credentials and issues an HTTP-only JWT `auth_token` cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: "admin_user"
+                password:
+                  type: string
+                  format: password
+                  example: "securePassword123"
       responses:
         '200':
-          description: Connection status and QR code if available
-  /auth/connect/status:
+          description: Authentication successful. `auth_token` cookie set.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: "auth_token=eyJhbGciOiJIUzI1Ni...; Path=/; HttpOnly"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid username or password.
+
+  /api/api-keys:
     get:
-      summary: Get connection status
+      summary: List User API Keys
+      description: Returns all API keys generated for the authenticated user.
       security:
-        - ApiKeyAuth: []
+        - CookieAuth: []
       responses:
         '200':
-          description: Whether the connection is ready
-  /auth/connect/qr:
-    get:
-      summary: Get QR code for connection
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: QR code string
-  /auth/connect/pairing-code:
-    get:
-      summary: Get pairing code for connection
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Pairing code string
-  /stream:
-    get:
-      summary: Connect to message stream (SSE)
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Event source stream
-  /send/typing:
+          description: List of API keys.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      apiKeys:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ApiKeyItem'
+        '401':
+          description: Unauthorized - missing or invalid `auth_token` cookie.
+
+  /api/api-keys/generate:
     post:
-      summary: Send typing indicator
+      summary: Generate New API Key
+      description: Generates and persists a new UUID v4 API key for the authenticated user.
       security:
-        - ApiKeyAuth: []
+        - CookieAuth: []
+      responses:
+        '200':
+          description: API key generated successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      apiKey:
+                        type: string
+                        format: uuid
+                        example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        '401':
+          description: Unauthorized.
+
+  /api/sessions:
+    get:
+      summary: List User WhatsApp Sessions
+      description: Returns all configured WhatsApp session records for the authenticated user.
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: Sessions list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      sessions:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SessionItem'
+        '401':
+          description: Unauthorized.
+    post:
+      summary: Create WhatsApp Session
+      description: Registers a new WhatsApp phone number and creates a corresponding session ID.
+      security:
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -98,14 +395,33 @@ paths:
               properties:
                 phoneNumber:
                   type: string
+                  description: Phone number in international or local format (e.g., 08012345678 or 2348012345678)
+                  example: "08012345678"
       responses:
         '200':
-          description: Success
+          description: Session created successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      session:
+                        $ref: '#/components/schemas/SessionItem'
         '400':
-          description: Phone number required
-  /send/text:
+          description: Invalid phone number or validation failure.
+        '401':
+          description: Unauthorized.
+
+  /api/v1/connection:
     post:
-      summary: Send text message
+      summary: Connect WhatsApp Session
+      description: Initiates the Baileys socket connection for a specific session ID and phone number.
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -115,21 +431,404 @@ paths:
             schema:
               type: object
               required:
+                - sessionId
+                - phoneNumber
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                phoneNumber:
+                  type: string
+                  example: "08012345678"
+      responses:
+        '200':
+          description: Connection initiated or already active.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      serviceStatus:
+                        type: string
+                        example: "connected"
+                      sessionId:
+                        type: string
+                        example: "d41d8cd98f00b204e9800998ecf8427e"
+        '400':
+          description: Connection failed or phone number is already connected.
+        '401':
+          description: Phone number not registered or invalid API key.
+        '404':
+          description: Session not found.
+
+  /api/v1/connection/{sessionId}/status:
+    get:
+      summary: Get Connection & Pairing Status
+      description: Returns the real-time status of the WhatsApp socket and whether pairing/QR is ready.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+          description: Unique session ID
+      responses:
+        '200':
+          description: Current socket state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      isConnected:
+                        type: boolean
+                        example: true
+                      isPairingReady:
+                        type: boolean
+                        example: false
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Session not found.
+
+  /api/v1/connection/{sessionId}/qr:
+    get:
+      summary: Get WhatsApp QR Code
+      description: Retrieves the active QR code string for scanning in WhatsApp Mobile App.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+          description: Unique session ID
+      responses:
+        '200':
+          description: QR code string payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      qr:
+                        type: string
+                        nullable: true
+                        example: "2@xP5k...==,3k9J...==,1@f7..."
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Session not found.
+
+  /api/v1/connection/{sessionId}/pairing-code:
+    get:
+      summary: Get WhatsApp 8-Digit Pairing Code
+      description: Retrieves the 8-character pairing code for linking via phone number without QR code.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+          description: Unique session ID
+      responses:
+        '200':
+          description: Pairing code payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      pairingCode:
+                        type: string
+                        nullable: true
+                        example: "ABCD-1234"
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Session not found.
+
+  /api/v1/connection/{sessionId}/end:
+    post:
+      summary: Terminate WhatsApp Session
+      description: Gracefully closes the Baileys socket and terminates the session.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+          description: Unique session ID
+      responses:
+        '200':
+          description: Session terminated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      serviceStatus:
+                        type: string
+                        enum: ["disconnected", "failed to disconnect"]
+                        example: "disconnected"
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Session not found.
+
+  /api/v1/events:
+    get:
+      summary: Poll WhatsApp Events
+      description: Retrieve persisted WhatsApp events (incoming messages, message receipts, connection state changes) with cursor-based pagination.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: sessionId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter events by session ID.
+        - name: eventType
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by event type (e.g. message, message.update, connection, qr).
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+          description: MongoDB ObjectId cursor. Returns events created strictly after this ID.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+          description: Maximum number of events to return.
+      responses:
+        '200':
+          description: List of events matching criteria.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      events:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            _id:
+                              type: string
+                              example: "6724fa0e219ba3cb9e9ef402"
+                            userId:
+                              type: string
+                            sessionId:
+                              type: string
+                            eventType:
+                              type: string
+                              example: "message"
+                            payload:
+                              type: object
+                            createdAt:
+                              type: string
+                              format: date-time
+                      count:
+                        type: integer
+                        example: 1
+                      lastCursor:
+                        type: string
+                        nullable: true
+                        example: "6724fa0e219ba3cb9e9ef402"
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Session not found.
+    delete:
+      summary: Delete Events for Session
+      description: Purge persisted events for a specific session.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: sessionId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Session ID whose events to clear.
+      responses:
+        '200':
+          description: Events successfully deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      deletedCount:
+                        type: integer
+                        example: 5
+        '400':
+          description: Missing sessionId query parameter.
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Session not found.
+
+  /api/v1/send/typing:
+    post:
+      summary: Send Typing Presence Indicator
+      description: Broadcasts a typing/composing presence indicator to a recipient WhatsApp chat.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - phoneNumber
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                phoneNumber:
+                  type: string
+                  description: Target recipient phone number
+                  example: "08012345678"
+      responses:
+        '200':
+          description: Typing indicator sent successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: "Typing sent successfully"
+        '400':
+          description: Failed to send typing indicator or invalid payload.
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/send/text:
+    post:
+      summary: Send Text Message
+      description: Sends a plain text message to a WhatsApp recipient.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
                 - phoneNumber
                 - message
               properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
                 phoneNumber:
                   type: string
+                  description: Target recipient phone number
+                  example: "08012345678"
                 message:
                   type: string
+                  example: "Hello from WhatsApp Server!"
       responses:
         '200':
-          description: Success
+          description: Text message sent successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: "Message sent successfully"
         '400':
-          description: Phone number and message required
-  /send/file:
+          description: Validation failure or send failure.
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/send/file:
     post:
-      summary: Send media file
+      summary: Send Media File / Document
+      description: Sends an image, video, audio, or document (up to 25MB) using `multipart/form-data`.
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -139,24 +838,45 @@ paths:
             schema:
               type: object
               required:
+                - sessionId
                 - phoneNumber
                 - file
               properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
                 phoneNumber:
                   type: string
+                  description: Target recipient phone number
+                  example: "08012345678"
                 caption:
                   type: string
+                  description: Optional caption for media (images, videos, documents)
+                  example: "Monthly report attachment"
                 file:
                   type: string
                   format: binary
+                  description: Media or document binary file (max 25MB)
       responses:
         '200':
-          description: Success
+          description: Media file uploaded and dispatched successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: "File sent successfully"
         '400':
-          description: Phone number and file required
-components:
-  securitySchemes:
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: x-api-key
+          description: Invalid file format, exceeding 25MB, or send failure.
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.

@@ -1,7 +1,7 @@
 
 import { type WAMessageKey } from "baileys";
 import { EventEmitter } from "events";
-import { type WhatsappEvents } from "../types/whatsapp.js";
+import { ConnectionStatus, type WhatsappEvents } from "../types/whatsapp.js";
 import { nameLogger } from "./logger.js";
 import { SessionNotFoundError } from "../errors/whatsapp-errors.js";
 import { clearUserKeys } from "../data/queries.js";
@@ -29,13 +29,17 @@ class WhatsappManager {
         return sessions;
     }
 
+    getActiveSessions() {
+        return this.activeSessions;
+    }
+
     private async clearSession(sessionId: string) {
         const session = await Session.findOne({ id: sessionId });
         if (!session) {
             logger.info("No session record found");
             return false;
         }
-        const status = await clearUserKeys(session.userId);
+        const status = await clearUserKeys(session.phoneNumber);
         return status;
     }
 
@@ -95,7 +99,9 @@ class WhatsappManager {
         const inflightGuard = this.isConnecting.get(sessionId);
         if (inflightGuard) {
             await inflightGuard;
-            return this.sockets.get(sessionId)?.isConnected();
+            return this.sockets.get(sessionId)?.isConnected()
+                ? ConnectionStatus.CONNECTED
+                : ConnectionStatus.DISCONNECTED;
         }
         const existing = this.sockets.get(sessionId);
         let promiseResolve = () => { };
@@ -104,10 +110,9 @@ class WhatsappManager {
         try {
             // Already connected — idempotent, no-op
             if (existing?.isConnected()) {
-                logger.info("Already connected for this API key");
-                return existing.isConnected();
+                logger.info("Already connected for this session");
+                return ConnectionStatus.CONNECTED;
             }
-
 
             if (existing) {
                 return await existing.connect();
@@ -118,10 +123,9 @@ class WhatsappManager {
                 return null;
             }
 
-            const clientSession = new WhatsappService(session.phoneNumber);
-            const status = await clientSession.connect();
+            const clientSession = new WhatsappService(session.phoneNumber, sessionId, session.userId);
             this.sockets.set(sessionId, clientSession);
-            return status;
+            return await clientSession.connect();
         } finally {
             promiseResolve();
             this.isConnecting.delete(sessionId);
@@ -134,8 +138,7 @@ class WhatsappManager {
             if (!clientSession) throw new SessionNotFoundError(sessionId);
 
             const sessionStatus = await clientSession.disconnect();
-            const keysStatus = await this.clearSession(sessionId);
-            return sessionStatus && keysStatus;
+            return sessionStatus;
         } finally {
             this.sockets.delete(sessionId);
         }
