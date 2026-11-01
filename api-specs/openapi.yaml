@@ -22,6 +22,17 @@ components:
       name: auth_token
       description: JWT cookie authentication for administrative user, session, and API key management endpoints.
 
+  parameters:
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Optional client-generated UUID v4 idempotency key to prevent duplicate message dispatch.
+      schema:
+        type: string
+        format: uuid
+        example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+
   schemas:
     StandardSuccessResponse:
       type: object
@@ -118,6 +129,99 @@ components:
           enum: [INFO, DEBUG, ERROR, WARN]
           example: "INFO"
         timestamp:
+          type: string
+          format: date-time
+
+    OutboxEnqueueResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            outboxId:
+              type: string
+              example: "6725225c57fa85b5420cb051"
+            messageId:
+              type: string
+              example: "3EB091AE751D87A0"
+            remoteJid:
+              type: string
+              example: "2348012345678@s.whatsapp.net"
+            status:
+              type: string
+              enum: [queued, processing, dispatched, delivered_to_server, failed_terminal, cancelled]
+              example: "queued"
+            idempotencyKey:
+              type: string
+              example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+            deduplicated:
+              type: boolean
+              example: false
+            message:
+              type: string
+              example: "Message queued for delivery"
+
+    OutboxItem:
+      type: object
+      properties:
+        _id:
+          type: string
+          example: "6725225c57fa85b5420cb051"
+        userId:
+          type: string
+          example: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+        sessionId:
+          type: string
+          example: "d41d8cd98f00b204e9800998ecf8427e"
+        idempotencyKey:
+          type: string
+          example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        waMessageId:
+          type: string
+          example: "3EB091AE751D87A0"
+        recipientJid:
+          type: string
+          example: "2348012345678@s.whatsapp.net"
+        actionType:
+          type: string
+          enum: [text, media_url, media_file, voice, react, delete, read]
+          example: "text"
+        payload:
+          type: object
+        simulateTyping:
+          type: boolean
+          example: false
+        status:
+          type: string
+          enum: [QUEUED, PROCESSING, DISPATCHED, DELIVERED_TO_SERVER, FAILED_TERMINAL, CANCELLED]
+          example: "QUEUED"
+        attempts:
+          type: integer
+          example: 0
+        maxAttempts:
+          type: integer
+          example: 6
+        nextAttemptAt:
+          type: string
+          format: date-time
+        dispatchedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastError:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
           type: string
           format: date-time
 
@@ -500,6 +604,10 @@ paths:
                       isPairingReady:
                         type: boolean
                         example: false
+                      status:
+                        type: string
+                        enum: [connected, connecting, reconnecting, degraded, disconnected]
+                        example: "connected"
         '401':
           description: Invalid API key.
         '404':
@@ -777,9 +885,11 @@ paths:
   /api/v1/send/text:
     post:
       summary: Send Text Message
-      description: Sends a plain text message to a WhatsApp recipient.
+      description: Queues a plain text message in the outbox for resilient asynchronous delivery to a WhatsApp recipient.
       security:
         - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
       requestBody:
         required: true
         content:
@@ -801,25 +911,23 @@ paths:
                 message:
                   type: string
                   example: "Hello from WhatsApp Server!"
+                simulateTyping:
+                  type: boolean
+                  description: Whether to simulate human typing indicator before dispatch
+                  example: false
       responses:
-        '200':
-          description: Text message sent successfully.
+        '202':
+          description: Message queued in outbox for resilient delivery.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  data:
-                    type: object
-                    properties:
-                      message:
-                        type: string
-                        example: "Message sent successfully"
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
         '400':
           description: Validation failure or send failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
         '401':
           description: Invalid API key.
         '500':
@@ -828,9 +936,11 @@ paths:
   /api/v1/send/file:
     post:
       summary: Send Media File / Document
-      description: Sends an image, video, audio, or document (up to 25MB) using `multipart/form-data`.
+      description: Stages and queues an image, video, audio, or document (up to 25MB) in the outbox using `multipart/form-data`. Staged files are unlinked after delivery or terminal failure.
       security:
         - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
       requestBody:
         required: true
         content:
@@ -857,9 +967,167 @@ paths:
                   type: string
                   format: binary
                   description: Media or document binary file (max 25MB)
+                simulateTyping:
+                  type: boolean
+                  description: Whether to simulate human typing indicator before dispatch
+                  example: false
+      responses:
+        '202':
+          description: Media file staged and queued in outbox for resilient delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Invalid file format, exceeding 25MB, or send failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/send/media:
+    post:
+      summary: Send Media via URL
+      description: Queues a media file from a remote public URL for asynchronous dispatch. Validates URL against private network SSRF attacks.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - phoneNumber
+                - mediaType
+                - mediaUrl
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                phoneNumber:
+                  type: string
+                  description: Target recipient phone number
+                  example: "08012345678"
+                mediaType:
+                  type: string
+                  description: Type of media to send
+                  enum: [image, video, audio, document]
+                  example: "image"
+                mediaUrl:
+                  type: string
+                  format: uri
+                  description: Public URL of the media file
+                  example: "https://example.com/images/sample.jpg"
+                caption:
+                  type: string
+                  description: Optional caption for the media
+                  example: "Check out this image"
+                simulateTyping:
+                  type: boolean
+                  description: Whether to simulate human typing indicator before dispatch
+                  example: false
+      responses:
+        '202':
+          description: Media queued in outbox for resilient delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure or blocked private URL (SSRF).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/send/voice:
+    post:
+      summary: Send Voice Note / PTT
+      description: Uploads and queues an audio recording as a push-to-talk (PTT) voice note in the outbox. Staged audio is unlinked after delivery or terminal failure.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - phoneNumber
+                - file
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                phoneNumber:
+                  type: string
+                  description: Target recipient phone number
+                  example: "08012345678"
+                file:
+                  type: string
+                  format: binary
+                  description: Audio binary file (audio/ogg, audio/mp4, audio/mpeg, etc.)
+                simulateTyping:
+                  type: boolean
+                  description: Whether to simulate human typing indicator before dispatch
+                  example: false
+      responses:
+        '202':
+          description: Voice note queued in outbox for resilient delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Unsupported media type (not audio) or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/contacts/{phoneNumber}/on-whatsapp:
+    get:
+      summary: Check if Phone Number is on WhatsApp
+      description: Verifies whether the specified phone number is registered on WhatsApp.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: phoneNumber
+          required: true
+          schema:
+            type: string
+          description: Target phone number
+          example: "08012345678"
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+          description: Session ID to check against
+          example: "d41d8cd98f00b204e9800998ecf8427e"
       responses:
         '200':
-          description: Media file uploaded and dispatched successfully.
+          description: Contact status check completed.
           content:
             application/json:
               schema:
@@ -871,12 +1139,375 @@ paths:
                   data:
                     type: object
                     properties:
-                      message:
+                      phoneNumber:
                         type: string
-                        example: "File sent successfully"
+                        example: "08012345678"
+                      exists:
+                        type: boolean
+                        example: true
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Session not found.
+
+  /api/v1/messages/react:
+    post:
+      summary: React to a Message
+      description: Queues an emoji reaction to an existing message in the outbox.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - messageId
+                - remoteJid
+                - emoji
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                messageId:
+                  type: string
+                  description: Unique WhatsApp message ID to react to
+                  example: "3EB091AE751D87A0"
+                remoteJid:
+                  type: string
+                  description: JID of the chat or recipient
+                  example: "2348012345678@s.whatsapp.net"
+                emoji:
+                  type: string
+                  description: Emoji character to react with, or empty string to remove reaction
+                  example: "👍"
+                fromMe:
+                  type: boolean
+                  description: Whether the target message was sent by the current session
+                  example: false
+      responses:
+        '202':
+          description: Reaction queued in outbox for resilient delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
         '400':
-          description: Invalid file format, exceeding 25MB, or send failure.
+          description: Validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
         '401':
           description: Invalid API key.
         '500':
           description: Internal server error.
+
+  /api/v1/messages/delete:
+    post:
+      summary: Delete a Message (Revoke)
+      description: Queues a message deletion (revoke for everyone) in the outbox.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - messageId
+                - remoteJid
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                messageId:
+                  type: string
+                  description: Unique WhatsApp message ID to delete
+                  example: "3EB091AE751D87A0"
+                remoteJid:
+                  type: string
+                  description: JID of the chat or recipient
+                  example: "2348012345678@s.whatsapp.net"
+                fromMe:
+                  type: boolean
+                  description: Whether the target message was sent by the current session (default true)
+                  example: true
+      responses:
+        '202':
+          description: Message deletion queued in outbox for resilient delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/messages/read:
+    post:
+      summary: Mark Message as Read
+      description: Queues a read receipt for incoming messages in the outbox.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - messageId
+                - remoteJid
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                messageId:
+                  type: string
+                  description: Unique WhatsApp message ID to mark as read
+                  example: "3EB091AE751D87A0"
+                remoteJid:
+                  type: string
+                  description: JID of the chat or sender
+                  example: "2348012345678@s.whatsapp.net"
+                fromMe:
+                  type: boolean
+                  description: Whether the target message was sent by the current session (default false)
+                  example: false
+      responses:
+        '202':
+          description: Read receipt queued in outbox for resilient delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/outbox:
+    get:
+      summary: Query Outbox Items
+      description: Retrieve paginated outbox messages and their current delivery states with cursor-based pagination.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: query
+          name: sessionId
+          required: false
+          schema:
+            type: string
+          description: Filter outbox items by session ID.
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [QUEUED, PROCESSING, DISPATCHED, DELIVERED_TO_SERVER, FAILED_TERMINAL, CANCELLED]
+          description: Filter outbox items by status.
+        - in: query
+          name: after
+          required: false
+          schema:
+            type: string
+          description: MongoDB ObjectId cursor. Returns items created strictly after this ID.
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+          description: Maximum number of outbox items to return.
+      responses:
+        '200':
+          description: Paginated outbox items retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/OutboxItem'
+                      nextCursor:
+                        type: string
+                        nullable: true
+                        example: "6725225c57fa85b5420cb051"
+                      hasMore:
+                        type: boolean
+                        example: false
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Session not found (if sessionId filter provided).
+
+  /api/v1/outbox/{outboxId}:
+    get:
+      summary: Get Outbox Item Details
+      description: Retrieves the detailed status, delivery attempts, timestamps, and error history of a specific outbox item.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: outboxId
+          required: true
+          schema:
+            type: string
+          description: MongoDB ObjectId of the outbox item.
+      responses:
+        '200':
+          description: Outbox item found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/OutboxItem'
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Outbox item not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+
+    delete:
+      summary: Cancel Queued Outbox Item
+      description: Cancels an outbox message and purges any staged media file. Only messages in `QUEUED` state can be cancelled.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: outboxId
+          required: true
+          schema:
+            type: string
+          description: MongoDB ObjectId of the outbox item.
+      responses:
+        '200':
+          description: Outbox item successfully cancelled.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      outboxId:
+                        type: string
+                        example: "6725225c57fa85b5420cb051"
+                      status:
+                        type: string
+                        example: "cancelled"
+                      message:
+                        type: string
+                        example: "Outbox item cancelled"
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Outbox item not found.
+        '409':
+          description: Cannot cancel item not in QUEUED status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+
+  /api/v1/outbox/{outboxId}/retry:
+    post:
+      summary: Retry Terminal or Cancelled Outbox Item
+      description: Re-queues a failed (`FAILED_TERMINAL`) or cancelled (`CANCELLED`) outbox message for immediate re-attempt. Resets attempt counter to 0.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: outboxId
+          required: true
+          schema:
+            type: string
+          description: MongoDB ObjectId of the outbox item.
+      responses:
+        '202':
+          description: Outbox item re-queued for delivery.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      outboxId:
+                        type: string
+                        example: "6725225c57fa85b5420cb051"
+                      messageId:
+                        type: string
+                        example: "3EB091AE751D87A0"
+                      status:
+                        type: string
+                        example: "queued"
+                      message:
+                        type: string
+                        example: "Outbox item re-queued for delivery"
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Outbox item not found.
+        '409':
+          description: Conflict - only FAILED_TERMINAL or CANCELLED items can be retried.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+        '410':
+          description: Gone - staged media file was already cleaned up. File must be re-uploaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'

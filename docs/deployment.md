@@ -12,6 +12,10 @@ This guide covers deployment strategies, environment configurations, reverse pro
 | `NODE_ENV` | String | Optional | `development` | Runtime environment (`development`, `production`, `test`). |
 | `MONGODB_URL` | String | **Required** | None | MongoDB URI connection string. Example: `mongodb://mongo:27017/whatsapp-server` |
 | `JWT_SECRET` | String | **Required** | None | 64-char random secret used for signing and verifying administrative JWT session cookies. |
+| `OUTBOX_RATE_LIMIT_PER_MIN` | Integer | Optional | `20` | Max messages sent per minute per session to avoid WhatsApp bans. |
+| `OUTBOX_ACK_TIMEOUT_MS` | Integer | Optional | `20000` | Milliseconds to wait for WhatsApp's SERVER_ACK receipt before re-queuing for replay. |
+| `OUTBOX_SWEEP_INTERVAL_MS` | Integer | Optional | `5000` | Interval in ms for background recovery sweep and delayed retries. |
+| `OUTBOX_MAX_ATTEMPTS` | Integer | Optional | `6` | Maximum delivery attempts before transitioning an Outbox message to FAILED_TERMINAL. |
 
 ---
 
@@ -43,8 +47,12 @@ services:
       - NODE_ENV=production
       - MONGODB_URL=mongodb://mongo:27017/whatsapp-server
       - JWT_SECRET=change_this_to_a_secure_random_64_character_string
+      - OUTBOX_RATE_LIMIT_PER_MIN=20
+      - OUTBOX_ACK_TIMEOUT_MS=20000
+      - OUTBOX_SWEEP_INTERVAL_MS=5000
+      - OUTBOX_MAX_ATTEMPTS=6
     volumes:
-      # Persistent volume for auto-reconnect session cache (data/sessions.json)
+      # Persistent volume for staged media uploads (/app/data/outbox-media/) and legacy migration files
       - whatsapp_session_data:/app/data
       - whatsapp_logs:/app
     depends_on:
@@ -77,7 +85,12 @@ volumes:
   mongo_data:
 ```
 
-### 2.3 Starting the Containers
+### 2.3 Persistent Volumes & Disk Management
+The persistent volume mapped to `/app/data` (`whatsapp_session_data`) stores both staged media uploads (`/app/data/outbox-media/`) and any legacy migration files (`/app/data/sessions.json`).
+- **Automatic Cleanup**: Disk-staged uploads are automatically unlinked upon delivery, cancellation, or max attempts, preventing disk bloat.
+- Disk usage should be monitored under high media traffic volumes to ensure sufficient buffer during staging.
+
+### 2.4 Starting the Containers
 ```bash
 # Build and start services in background
 docker compose up -d --build
@@ -201,14 +214,17 @@ api.yourdomain.com {
 
 ## 5. Persistent Storage & Backup Strategy
 
-1. **MongoDB Data Directory**:
-   - Contains all credentials, user logins, and Signal encryption keys (`Credential` & `KeyStore`).
+1. **MongoDB Data Directory & Outbox Collection**:
+   - Contains all credentials, user logins, Signal encryption keys (`Credential` & `KeyStore`), and the `outboxes` collection.
+   - Note that MongoDB backups now include the `outboxes` collection, which has an automatic 3-day TTL index (`expireAfterSeconds: 259200`) on `createdAt` that automatically purges old outbox messages to avoid unbounded storage growth.
    - Run regular automated backups using `mongodump`:
      ```bash
      mongodump --uri="mongodb://localhost:27017/whatsapp-server" --out=/backups/$(date +%F)
      ```
-2. **Session Cache (`data/sessions.json`)**:
-   - Ensure the `data/` directory is mapped to a persistent volume so cold restarts correctly restore active sessions.
+2. **Persistent Data Volume (`/app/data`)**:
+   - Ensure the persistent volume `/app/data` (`whatsapp_session_data`) is mounted.
+   - It stores both staged media uploads (`/app/data/outbox-media/`) and any legacy migration files (`/app/data/sessions.json`).
+   - Disk-staged uploads are automatically unlinked upon delivery, cancellation, or max attempts, preventing disk bloat.
 
 ---
 
@@ -236,3 +252,7 @@ curl -f http://localhost:3000/api/health || exit 1
 | `Logged out error (401)` | User unlinked device from WhatsApp Mobile app. | Call `POST /api/v1/connection/:sessionId/end` and re-initiate connection via `POST /api/v1/connection`. |
 | `File too large error (400)` | Uploaded file exceeds Multer's 25MB memory limit. | Compress media or split documents before dispatching. |
 | `SSE connection drops after 60s` | Reverse proxy idle timeout severed the connection. | Ensure `proxy_read_timeout 86400s;` and `proxy_buffering off;` are enabled in Nginx. |
+| `Outbox duplicate key handling / deduplication (deduplicated: true)` | Client sent a request with an `Idempotency-Key` that matches an existing outbox record for this session. | Expected behavior: returns `202 Accepted` with `deduplicated: true` and the existing outbox payload without re-dispatching a duplicate message to WhatsApp. Safe to treat as successful enqueue. |
+| `Cannot retry outbox job (409 Conflict)` | Client called `POST /api/v1/outbox/:outboxId/retry` on a message that is not in `FAILED_TERMINAL` or `CANCELLED` status. | Only items in `FAILED_TERMINAL` or `CANCELLED` states can be retried. Messages in `QUEUED`, `PROCESSING`, or `DISPATCHED` states must resolve via worker or ACK timeout. |
+| `Staged media purged (410 Gone)` | Client attempted to retry a media/voice outbox job whose disk-staged file was already purged after delivery or terminal failure. | Staged files in `/app/data/outbox-media/` are cleaned up automatically to prevent disk bloat. The file cannot be re-sent from cache; re-upload the file via `/api/v1/send/file` or `/api/v1/send/voice`. |
+| `Reconnection DEGRADED state` | Session encountered 5 consecutive backoff reconnection failures (e.g. extended internet outage or WhatsApp service degradation). | The session transitions to `DEGRADED` state where it probes reconnection every 60s (+ jitter) indefinitely rather than dying after ~75s. Once network connectivity is restored, the connection automatically recovers to `CONNECTED`. Inspect server logs (`pm2 logs` or `docker compose logs`) to verify outbound internet reachability. |
