@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import "dotenv/config";
 import { logger } from "../lib/logger.js";
-import type { IApiKey, IEvent, IPhoneNumber, ISession, IUser } from "../types/models.js";
+import type { IApiKey, IEvent, IOutbox, IPhoneNumber, ISession, IUser } from "../types/models.js";
 
 const DATABASE_URL = process.env.MONGODB_URL;
 
@@ -67,6 +67,8 @@ const credentialSchema = new mongoose.Schema({
     credential: String,
 });
 
+credentialSchema.index({ phoneNumber: 1 }, { unique: true });
+
 const keyStoreSchema = new mongoose.Schema({
     id: String,
     key: String,
@@ -74,6 +76,8 @@ const keyStoreSchema = new mongoose.Schema({
     phoneNumber: String,
     type: String,
 });
+
+keyStoreSchema.index({ phoneNumber: 1, key: 1 }, { unique: true });
 
 const logSchema = new mongoose.Schema({
     id: String,
@@ -95,8 +99,20 @@ const sessionSchema = new mongoose.Schema<ISession>({
     phoneNumber: {
         type: String,
         required: true
+    },
+    desiredState: {
+        type: String,
+        enum: ["CONNECTED", "DISCONNECTED"],
+        default: "DISCONNECTED"
+    },
+    updatedAt: {
+        type: Date,
+        default: Date.now
     }
 });
+
+sessionSchema.index({ id: 1 }, { unique: true });
+sessionSchema.index({ desiredState: 1 });
 
 const eventSchema = new mongoose.Schema<IEvent>({
     userId: {
@@ -128,6 +144,32 @@ eventSchema.index({ userId: 1, _id: 1 });
 eventSchema.index({ userId: 1, sessionId: 1, _id: 1 });
 eventSchema.index({ createdAt: 1 }, { expireAfterSeconds: 259200 }); // 3 days TTL
 
+const outboxSchema = new mongoose.Schema<IOutbox>({
+    userId: { type: String, required: true, index: true },
+    sessionId: { type: String, required: true, index: true },
+    idempotencyKey: { type: String, required: true },
+    waMessageId: { type: String, required: true, index: true },
+    recipientJid: { type: String, required: true },
+    actionType: { type: String, enum: ["text", "media_url", "media_file", "voice", "react", "delete", "read"], required: true },
+    payload: { type: mongoose.Schema.Types.Mixed, required: true },
+    simulateTyping: { type: Boolean, default: false },
+    status: { type: String, enum: ["QUEUED", "PROCESSING", "DISPATCHED", "DELIVERED_TO_SERVER", "FAILED_TERMINAL", "CANCELLED"], default: "QUEUED", index: true },
+    attempts: { type: Number, default: 0 },
+    maxAttempts: { type: Number, default: 6 },
+    nextAttemptAt: { type: Date, default: Date.now, index: true },
+    dispatchedAt: { type: Date, default: null },
+    completedAt: { type: Date, default: null },
+    lastError: { type: String, default: null },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+});
+
+outboxSchema.index({ sessionId: 1, idempotencyKey: 1 }, { unique: true });
+outboxSchema.index({ sessionId: 1, status: 1, nextAttemptAt: 1, _id: 1 });
+outboxSchema.index({ sessionId: 1, waMessageId: 1 });
+outboxSchema.index({ userId: 1, _id: 1 });
+outboxSchema.index({ createdAt: 1 }, { expireAfterSeconds: 259200 }); // 3 days TTL
+
 export const User = mongoose.model<IUser>("User", userSchema);
 export const ApiKey = mongoose.model<IApiKey>("ApiKey", apiKeySchema);
 export const PhoneNumber = mongoose.model<IPhoneNumber>("PhoneNumber", phoneNumbersSchema);
@@ -136,3 +178,4 @@ export const KeyStore = mongoose.model("KeyStore", keyStoreSchema);
 export const Log = mongoose.model("Log", logSchema);
 export const Session = mongoose.model<ISession>("Session", sessionSchema);
 export const Event = mongoose.model<IEvent>("Event", eventSchema);
+export const Outbox = mongoose.model<IOutbox>("Outbox", outboxSchema);

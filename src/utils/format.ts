@@ -1,4 +1,7 @@
 export function formatJid(phoneNumber: string): string {
+    if (phoneNumber.includes("@")) {
+        return phoneNumber;
+    }
     return `${phoneNumber}@s.whatsapp.net`;
 }
 

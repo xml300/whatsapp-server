@@ -84,9 +84,10 @@ router.get('/:sessionId/status', authMiddleware, async (req, res) => {
     }
     const isConnected = whatsappService.isConnected(sessionId);
     const isPairingReady = whatsappService.isConnectionReady(sessionId);
+    const status = whatsappService.getSessionStatus(sessionId);
     return res.json({
         success: true,
-        data: { isConnected, isPairingReady }
+        data: { isConnected, isPairingReady, status }
     });
 });
 

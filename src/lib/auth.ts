@@ -1,6 +1,27 @@
 import { Credential, KeyStore } from "../data/db.js";
 import { BufferJSON, initAuthCreds, proto } from 'baileys';
 import type { AuthenticationState, AuthenticationCreds, SignalDataTypeMap } from 'baileys';
+
+const keyLocks = new Map<string, Promise<unknown>>();
+
+async function withKeyLock<T>(phoneNumber: string, fn: () => Promise<T>): Promise<T> {
+	const current = keyLocks.get(phoneNumber) ?? Promise.resolve();
+	let resolveLock!: () => void;
+	const next = new Promise<void>((resolve) => {
+		resolveLock = resolve;
+	});
+	keyLocks.set(phoneNumber, next);
+
+	try {
+		await current.catch(() => {});
+		return await fn();
+	} finally {
+		resolveLock();
+		if (keyLocks.get(phoneNumber) === next) {
+			keyLocks.delete(phoneNumber);
+		}
+	}
+}
  
 export const useNoSQLAuthState = async (
 	phoneNumber: string
@@ -34,7 +55,7 @@ export const useNoSQLAuthState = async (
 		});
 	}
 
-	const creds: AuthenticationCreds = await readCreds();
+	const creds: AuthenticationCreds = await withKeyLock(phoneNumber, () => readCreds());
 
 
 	return {
@@ -42,55 +63,62 @@ export const useNoSQLAuthState = async (
 			creds,
 			keys: {
 				get: async (type, ids) => {
-					const data: { [_: string]: SignalDataTypeMap[typeof type] } = {}
-					const keys = await readKeys(type, ids);
-					keys.forEach(({id, value}) => {
-						data[id] = value;
+					return withKeyLock(phoneNumber, async () => {
+						const data: { [_: string]: SignalDataTypeMap[typeof type] } = {}
+						const keys = await readKeys(type, ids);
+						keys.forEach(({id, value}) => {
+							data[id] = value;
+						});
+						return data;
 					});
-					return data;
 				},
 				set: async (data: any) => {
-					const keys: any[] = [];
-					const toDeleteKeys: any[] = [];
+					return withKeyLock(phoneNumber, async () => {
+						const keys: any[] = [];
+						const toDeleteKeys: any[] = [];
 
-					for (const category in data) {
-						for (const id in data[category as keyof SignalDataTypeMap]) {
-							const value = data[category as keyof SignalDataTypeMap]![id]
-							const key = `${category}-${id}`;
+						for (const category in data) {
+							for (const id in data[category as keyof SignalDataTypeMap]) {
+								const value = data[category as keyof SignalDataTypeMap]![id]
+								const key = `${category}-${id}`;
 
-							if(value){
-								keys.push({
-									phoneNumber: phoneNumber,
-									key: key,
-									type: category,
-									id: id,
-									value: JSON.stringify(value, BufferJSON.replacer)
-								});
-							}else{
-								toDeleteKeys.push(key);
+								if(value){
+									keys.push({
+										phoneNumber: phoneNumber,
+										key: key,
+										type: category,
+										id: id,
+										value: JSON.stringify(value, BufferJSON.replacer)
+									});
+								}else{
+									toDeleteKeys.push(key);
+								}
 							}
 						}
-					}
 
-					const ops = keys.map(entry => ({
-						updateOne: {
-							filter: {phoneNumber: phoneNumber, key: entry.key},
-							update: {$set: entry},
-							upsert: true
+						const ops: any[] = keys.map(entry => ({
+							updateOne: {
+								filter: { phoneNumber: phoneNumber, key: entry.key },
+								update: { $set: entry },
+								upsert: true
+							}
+						}));
+						if (toDeleteKeys.length > 0) {
+							ops.push({
+								deleteMany: {
+									filter: { phoneNumber: phoneNumber, key: { $in: toDeleteKeys } }
+								}
+							});
 						}
-					}))
-					 
-					if(ops.length > 0){
-						await KeyStore.bulkWrite(ops);
-					}
-					if(toDeleteKeys.length > 0){
-						await KeyStore.deleteMany({ phoneNumber: phoneNumber, key: { $in: toDeleteKeys } });
-					}
+						if (ops.length > 0) {
+							await KeyStore.bulkWrite(ops);
+						}
+					});
 				}
 			}
 		},
 		saveCreds: async () => {
-			return writeCreds(creds);
+			return withKeyLock(phoneNumber, () => writeCreds(creds));
 		}
 	}
 }

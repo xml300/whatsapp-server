@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { unlink } from "fs/promises";
 import { ruleRegistry } from "../utils/validators.js";
 
 export interface ValidationConfig {
@@ -104,6 +105,9 @@ export default function validate(config: ValidationConfig) {
         }
 
         if (errors.length > 0) {
+            if (req.file?.path) {
+                unlink(req.file.path).catch(() => {});
+            }
             return res.status(400).json({
                 success: false,
                 error: {

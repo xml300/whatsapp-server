@@ -17,7 +17,7 @@ app.use(loggingMiddleware);
 app.use(cors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'x-api-key'],
+    allowedHeaders: ['Content-Type', 'x-api-key', 'Idempotency-Key', 'idempotency-key'],
     credentials: true
 }));
 app.use(cookieParser());

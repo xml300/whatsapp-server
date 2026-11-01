@@ -2,6 +2,7 @@
 import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion, type AnyMediaMessageContent, type WAMessageKey } from "baileys";
 import { Boom } from "@hapi/boom";
 import { EventEmitter } from "events";
+import { readFile } from "fs/promises";
 import pino from "pino";
 import { ConnectionStatus, type ClientStateInfo, type WhatsappEvents } from "../types/whatsapp.js";
 import { formatJid } from "../utils/format.js";
@@ -78,35 +79,83 @@ export class WhatsappService {
             if (connection === 'close') {
                 const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                this.status = ConnectionStatus.DISCONNECTED;
-                if (this.userId && this.sessionId) {
-                    Events.create({
-                        userId: this.userId,
-                        sessionId: this.sessionId,
-                        eventType: "connection",
-                        payload: {
-                            status: ConnectionStatus.DISCONNECTED,
-                            statusCode,
-                            reason: (lastDisconnect?.error as Boom)?.message || "Connection closed"
-                        }
-                    }).catch((err) => logger.error(`Failed to store disconnected event: ${err}`));
-                }
-                this.emit('disconnected', this.sessionId || '0', (lastDisconnect?.error as Boom)?.message || "Connection closed");
-                if (shouldReconnect && this.retries < 5) {
-                    logger.info("Connection closed. Reconnecting...");
-                    this.retries = this.retries + 1;
-                    const timeout = setTimeout(() => this.connect().catch((err) => logger.error(`Reconnection error: ${err}`)), 5000 * this.retries);
-                    if (this.timeout) clearTimeout(this.timeout);
-                    this.timeout = timeout;
-                } else if (statusCode === DisconnectReason.loggedOut) {
-                    logger.info("Session logged out by WhatsApp. Clearing credentials...");
+
+                if (statusCode === DisconnectReason.loggedOut) {
+                    this.status = ConnectionStatus.DISCONNECTED;
+                    this.isPairingReady = false;
+                    this.qr = null;
+                    Session.updateOne({ id: this.sessionId }, { $set: { desiredState: "DISCONNECTED", updatedAt: new Date() } }).catch((err) => logger.error(`Failed to update session desiredState: ${err}`));
                     await clearUserKeys(this.phoneNumber);
+                    if (this.userId && this.sessionId) {
+                        Events.create({
+                            userId: this.userId,
+                            sessionId: this.sessionId,
+                            eventType: "connection",
+                            payload: {
+                                status: ConnectionStatus.DISCONNECTED,
+                                statusCode,
+                                reason: (lastDisconnect?.error as Boom)?.message || "Logged out"
+                            }
+                        }).catch((err) => logger.error(`Failed to store disconnected event: ${err}`));
+                    }
+                    this.emit('disconnected', this.sessionId || '0', (lastDisconnect?.error as Boom)?.message || "Logged out");
+                    this.emit('logged.out', this.sessionId || '0', "Session logged out by WhatsApp");
+                } else if (shouldReconnect) {
+                    this.retries = this.retries + 1;
+                    if (this.timeout) clearTimeout(this.timeout);
+
+                    if (this.retries <= 5) {
+                        this.status = ConnectionStatus.RECONNECTING;
+                        const baseDelay = Math.min(30000, 2000 * Math.pow(2, this.retries - 1));
+                        const jitter = Math.floor(Math.random() * 1000);
+                        const delay = baseDelay + jitter;
+                        logger.info(`Connection closed. Reconnecting in ${delay}ms (attempt ${this.retries}/5)...`);
+                        this.timeout = setTimeout(() => this.connect().catch((err) => logger.error(`Reconnection error: ${err}`)), delay);
+                    } else {
+                        this.status = ConnectionStatus.DEGRADED;
+                        const probeDelay = 60000 + Math.floor(Math.random() * 5000);
+                        logger.warn(`Session ${this.sessionId} in DEGRADED state (attempt ${this.retries}). Probing reconnection in ${probeDelay}ms...`);
+                        this.timeout = setTimeout(() => this.connect().catch((err) => logger.error(`Degraded probe error: ${err}`)), probeDelay);
+                    }
+
+                    if (this.userId && this.sessionId) {
+                        Events.create({
+                            userId: this.userId,
+                            sessionId: this.sessionId,
+                            eventType: "connection",
+                            payload: {
+                                status: this.status,
+                                statusCode,
+                                reason: (lastDisconnect?.error as Boom)?.message || "Connection closed"
+                            }
+                        }).catch((err) => logger.error(`Failed to store disconnected event: ${err}`));
+                    }
+                    this.emit('disconnected', this.sessionId || '0', (lastDisconnect?.error as Boom)?.message || "Connection closed");
                 } else {
-                    logger.info("Connection closed. Not reconnecting...");
+                    this.status = ConnectionStatus.DISCONNECTED;
+                    this.isPairingReady = false;
+                    this.qr = null;
+                    if (this.userId && this.sessionId) {
+                        Events.create({
+                            userId: this.userId,
+                            sessionId: this.sessionId,
+                            eventType: "connection",
+                            payload: {
+                                status: ConnectionStatus.DISCONNECTED,
+                                statusCode,
+                                reason: (lastDisconnect?.error as Boom)?.message || "Connection closed"
+                            }
+                        }).catch((err) => logger.error(`Failed to store disconnected event: ${err}`));
+                    }
+                    this.emit('disconnected', this.sessionId || '0', (lastDisconnect?.error as Boom)?.message || "Connection closed");
                 }
             } else if (connection === 'open') {
                 logger.info("✅ WhatsApp is connected!");
                 this.status = ConnectionStatus.CONNECTED;
+                this.isPairingReady = false;
+                this.qr = null;
+                this.retries = 0;
+                Session.updateOne({ id: this.sessionId }, { $set: { desiredState: "CONNECTED", updatedAt: new Date() } }).catch((err) => logger.error(`Failed to update session desiredState: ${err}`));
                 if (this.userId && this.sessionId) {
                     Events.create({
                         userId: this.userId,
@@ -119,7 +168,6 @@ export class WhatsappService {
                     }).catch((err) => logger.error(`Failed to store connected event: ${err}`));
                 }
                 this.emit('connected', this.sessionId || '0');
-                this.retries = 0;
             }
         });
     }
@@ -166,6 +214,10 @@ export class WhatsappService {
                 this.emit('message.update', this.sessionId || '0', update);
             }
         });
+
+        this.socket?.ev.on('messages.update', async (updates) => {
+            this.emit('messages.update', this.sessionId || '0', updates);
+        });
     }
 
     on<K extends keyof WhatsappEvents>(event: K, listener: WhatsappEvents[K]) {
@@ -178,6 +230,14 @@ export class WhatsappService {
 
     emit<K extends keyof WhatsappEvents>(event: K, ...args: Parameters<WhatsappEvents[K]>) {
         this.emitter.emit(event, ...args);
+    }
+
+    getStatus(): ConnectionStatus {
+        return this.status;
+    }
+
+    getUserId(): string {
+        return this.userId;
     }
 
     isConnected() {
@@ -209,6 +269,10 @@ export class WhatsappService {
             logger.info("Already connected for this session");
             return this.status;
         }
+
+        this.status = this.retries > 0
+            ? (this.retries > 5 ? ConnectionStatus.DEGRADED : ConnectionStatus.RECONNECTING)
+            : ConnectionStatus.CONNECTING;
 
         if (this.socket) {
             this.cleanupEventListeners();
@@ -263,12 +327,13 @@ export class WhatsappService {
         this.socket?.ev.removeAllListeners('connection.update');
         this.socket?.ev.removeAllListeners('messages.upsert');
         this.socket?.ev.removeAllListeners('message-receipt.update');
+        this.socket?.ev.removeAllListeners('messages.update');
         this.socket?.ev.removeAllListeners('creds.update');
     }
 
     async disconnect() {
         const socket = this.socket;
-        if (!socket) throw new SessionNotFoundError('0');
+        if (!socket) throw new SessionNotFoundError(this.sessionId);
         if (this.timeout) {
             clearTimeout(this.timeout);
         }
@@ -293,21 +358,37 @@ export class WhatsappService {
     }
 
 
+    private async recordOutgoingMessage(message: any) {
+        if (this.userId && this.sessionId && message) {
+            try {
+                await Events.create({
+                    userId: this.userId,
+                    sessionId: this.sessionId,
+                    eventType: "message",
+                    payload: message
+                });
+            } catch (err) {
+                logger.error(`Failed to store outgoing message event: ${err}`);
+            }
+            this.emit('message', this.sessionId || '0', message);
+        }
+    }
+
     private async ensureSendable() {
         const { status, socket } = this;
-        if (status !== ConnectionStatus.CONNECTED) throw new NotConnectedError('0', status);
-        if (!socket) throw new NotConnectedError('0', status);
+        if (status !== ConnectionStatus.CONNECTED) throw new NotConnectedError(this.sessionId, status);
+        if (!socket) throw new NotConnectedError(this.sessionId, status);
 
         // const onWhatsapp = await this.isOnWhatsapp(phoneNumber);
-        // if (!onWhatsapp) throw new RecipientNotOnWhatsappError('0', phoneNumber);
+        // if (!onWhatsapp) throw new RecipientNotOnWhatsappError(this.sessionId, phoneNumber);
 
         return socket;
     }
 
     private ensureMessageKeyExists(messageKey: WAMessageKey) {
         const socket = this.socket;
-        if (!socket) throw new SessionNotFoundError('0');
-        if (!messageKey.remoteJid) throw new InvalidMessageKeyError('0');
+        if (!socket) throw new SessionNotFoundError(this.sessionId);
+        if (!messageKey.remoteJid) throw new InvalidMessageKeyError(this.sessionId);
         return { socket, messageKey };
     }
 
@@ -317,15 +398,31 @@ export class WhatsappService {
         return true;
     }
 
-    async sendMessage(phoneNumber: string, msgText: string) {
+    async sendTypingPaused(phoneNumber: string) {
         const socket = await this.ensureSendable();
-        const message = await socket.sendMessage(formatJid(phoneNumber), {
-            text: msgText
-        });
+        await socket.sendPresenceUpdate('paused', formatJid(phoneNumber));
+        return true;
+    }
+
+    async sendMessage(phoneNumber: string, msgText: string, customMessageId?: string) {
+        const socket = await this.ensureSendable();
+        const message = await socket.sendMessage(
+            formatJid(phoneNumber),
+            { text: msgText },
+            customMessageId ? { messageId: customMessageId } : undefined
+        );
+        await this.recordOutgoingMessage(message);
         return message;
     }
 
-    private buildMediaOptions(mediaType: string, contentType: 'file' | 'url', content: string | Buffer, caption?: string, filename?: string): AnyMediaMessageContent {
+    private buildMediaOptions(
+        mediaType: string,
+        contentType: 'file' | 'url',
+        content: string | Buffer,
+        caption?: string,
+        filename?: string,
+        mimetype?: string
+    ): AnyMediaMessageContent {
         const media = contentType === 'url'
             ? { url: content as string }
             : content as Buffer;
@@ -342,71 +439,111 @@ export class WhatsappService {
             };
         } else if (mediaType === "audio") {
             return {
-                audio: media
+                audio: media,
+                mimetype: mimetype || "audio/mp4"
             };
         } else {
             return {
                 document: media,
-                mimetype: "application/octet-stream",
+                mimetype: mimetype || "application/octet-stream",
                 fileName: filename || "document",
                 caption: caption || ""
             };
         }
     }
 
-
-    async sendMediaMessage(phoneNumber: string, mediaType: string, mediaUrl: string, caption?: string) {
+    async sendMediaMessage(phoneNumber: string, mediaType: string, mediaUrl: string, caption?: string, customMessageId?: string) {
         const socket = await this.ensureSendable();
 
         // SSRF guard: validate the URL before Baileys fetches it server-side
         const validated = await validateMediaUrl(mediaUrl);
         if (!validated) {
-            throw new SsrfBlockedUrlError('0');
+            throw new SsrfBlockedUrlError(this.sessionId);
         }
 
         const messageOptions: AnyMediaMessageContent = this.buildMediaOptions(mediaType, 'url', mediaUrl, caption);
-        const message = await socket.sendMessage(formatJid(phoneNumber), messageOptions);
+        const message = await socket.sendMessage(
+            formatJid(phoneNumber),
+            messageOptions,
+            customMessageId ? { messageId: customMessageId } : undefined
+        );
+        await this.recordOutgoingMessage(message);
         return message;
     }
 
-    async sendMediaFile(phoneNumber: string, file: Express.Multer.File, caption?: string) {
+    async sendMediaFile(
+        phoneNumber: string,
+        file: Express.Multer.File | { buffer?: Buffer; path?: string; mimetype: string; originalname: string },
+        caption?: string,
+        customMessageId?: string
+    ) {
         const socket = await this.ensureSendable();
+        const buffer = file.buffer ?? (file.path ? await readFile(file.path) : undefined);
+        if (!buffer) {
+            throw new Error("No file buffer or path provided for media file");
+        }
         const type = getMimeTypeGroup(file.mimetype);
-        const messageOptions: AnyMediaMessageContent = this.buildMediaOptions(type, 'file', file.buffer, caption, file.originalname);
-        const message = await socket.sendMessage(formatJid(phoneNumber), messageOptions);
+        const messageOptions: AnyMediaMessageContent = this.buildMediaOptions(
+            type,
+            'file',
+            buffer,
+            caption,
+            file.originalname,
+            file.mimetype
+        );
+        const message = await socket.sendMessage(
+            formatJid(phoneNumber),
+            messageOptions,
+            customMessageId ? { messageId: customMessageId } : undefined
+        );
+        await this.recordOutgoingMessage(message);
         return message;
     }
 
-    async sendVoiceNote(phoneNumber: string, file: Express.Multer.File) {
+    async sendVoiceNote(
+        phoneNumber: string,
+        file: Express.Multer.File | { buffer?: Buffer; path?: string; mimetype: string; originalname?: string },
+        customMessageId?: string
+    ) {
         const socket = await this.ensureSendable();
         const type = getMimeTypeGroup(file.mimetype);
-        if (type !== "audio") throw new UnsupportedMediaTypeError('0', file.mimetype);
+        if (type !== "audio") throw new UnsupportedMediaTypeError(this.sessionId, file.mimetype);
 
-        const messageOptions: AnyMediaMessageContent = {
-            audio: file.buffer,
-            mimetype: file.mimetype,
-            ptt: true
+        const buffer = file.buffer ?? (file.path ? await readFile(file.path) : undefined);
+        if (!buffer) {
+            throw new Error("No file buffer or path provided for voice note");
         }
 
-        const message = await socket.sendMessage(formatJid(phoneNumber), messageOptions);
+        const messageOptions: AnyMediaMessageContent = {
+            audio: buffer,
+            mimetype: file.mimetype,
+            ptt: true
+        };
+
+        const message = await socket.sendMessage(
+            formatJid(phoneNumber),
+            messageOptions,
+            customMessageId ? { messageId: customMessageId } : undefined
+        );
+        await this.recordOutgoingMessage(message);
         return message;
     }
-
-
 
     async isOnWhatsapp(phoneNumber: string) {
         const socket = this.socket;
-        if (!socket) throw new SessionNotFoundError('0');
+        if (!socket) throw new SessionNotFoundError(this.sessionId);
 
         const isWhatsappAvailable = await socket.onWhatsApp(phoneNumber);
         return isWhatsappAvailable?.[0]?.exists;
     }
 
-    async deleteMessage(msgKey: WAMessageKey) {
+    async deleteMessage(msgKey: WAMessageKey, customMessageId?: string) {
         const { socket, messageKey } = this.ensureMessageKeyExists(msgKey);
-        await socket.sendMessage(messageKey.remoteJid!, {
-            delete: messageKey
-        });
+        await socket.sendMessage(
+            messageKey.remoteJid!,
+            { delete: messageKey },
+            customMessageId ? { messageId: customMessageId } : undefined
+        );
         return true;
     }
 
@@ -416,14 +553,18 @@ export class WhatsappService {
         return true;
     }
 
-    async reactMessage(msgKey: WAMessageKey, emoji: string) {
+    async reactMessage(msgKey: WAMessageKey, emoji: string, customMessageId?: string) {
         const { socket, messageKey } = this.ensureMessageKeyExists(msgKey);
-        await socket.sendMessage(messageKey.remoteJid!, {
-            react: {
-                text: emoji,
-                key: messageKey
-            }
-        });
+        await socket.sendMessage(
+            messageKey.remoteJid!,
+            {
+                react: {
+                    text: emoji,
+                    key: messageKey
+                }
+            },
+            customMessageId ? { messageId: customMessageId } : undefined
+        );
         return true;
     }
 }

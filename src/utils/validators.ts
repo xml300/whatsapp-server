@@ -25,7 +25,12 @@ export const ruleRegistry: Record<string, ValidationRule> = {
         message: "Message content is required"
     },
     file: {
-        validate: (val) => !!(val && val.buffer && val.buffer.length > 0),
+        validate: (val) => !!(val && ((val.buffer && val.buffer.length > 0) || (val.path && typeof val.size === "number" && val.size > 0))),
         message: "File is required and cannot be empty"
+    },
+    boolean: {
+        validate: (val) => typeof val === "boolean" || val === "true" || val === "false",
+        transform: (val) => val === true || val === "true",
+        message: "must be a boolean"
     }
 };

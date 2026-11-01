@@ -3,7 +3,7 @@ import { type WAMessageKey } from "baileys";
 import { EventEmitter } from "events";
 import { ConnectionStatus, type WhatsappEvents } from "../types/whatsapp.js";
 import { nameLogger } from "./logger.js";
-import { SessionNotFoundError } from "../errors/whatsapp-errors.js";
+import { NotConnectedError, SessionNotFoundError } from "../errors/whatsapp-errors.js";
 import { clearUserKeys } from "../data/queries.js";
 import { Session } from "../data/db.js";
 import { WhatsappService } from "./whatsapp.js";
@@ -49,6 +49,31 @@ class WhatsappManager {
             return null;
         }
         return clientSession;
+    }
+
+    private forwardEvents(clientSession: WhatsappService) {
+        clientSession.on('connected', (id) => this.emit('connected', id));
+        clientSession.on('disconnected', (id, reason) => this.emit('disconnected', id, reason));
+        clientSession.on('qr', (id, qr) => this.emit('qr', id, qr));
+        clientSession.on('message', (id, data) => this.emit('message', id, data));
+        clientSession.on('message.update', (id, update) => this.emit('message.update', id, update));
+        clientSession.on('messages.update', (id, updates) => this.emit('messages.update', id, updates));
+        clientSession.on('logged.out', (id, reason) => this.emit('logged.out', id, reason));
+    }
+
+    getSessionStatus(sessionId: string): ConnectionStatus {
+        return this.sockets.get(sessionId)?.getStatus() ?? ConnectionStatus.DISCONNECTED;
+    }
+
+    async isEligibleForOutbox(sessionId: string, userId: string) {
+        const session = await Session.findOne({ id: sessionId, userId });
+        if (!session) {
+            throw new SessionNotFoundError(sessionId);
+        }
+        if (session.desiredState !== "CONNECTED" && !this.sockets.has(sessionId)) {
+            throw new NotConnectedError(sessionId, ConnectionStatus.DISCONNECTED);
+        }
+        return session;
     }
 
     on<K extends keyof WhatsappEvents>(event: K, listener: WhatsappEvents[K]) {
@@ -108,6 +133,8 @@ class WhatsappManager {
         const promise = new Promise<void>((resolve) => promiseResolve = resolve);
         this.isConnecting.set(sessionId, promise);
         try {
+            await Session.updateOne({ id: sessionId }, { $set: { desiredState: "CONNECTED", updatedAt: new Date() } });
+
             // Already connected — idempotent, no-op
             if (existing?.isConnected()) {
                 logger.info("Already connected for this session");
@@ -124,6 +151,7 @@ class WhatsappManager {
             }
 
             const clientSession = new WhatsappService(session.phoneNumber, sessionId, session.userId);
+            this.forwardEvents(clientSession);
             this.sockets.set(sessionId, clientSession);
             return await clientSession.connect();
         } finally {
@@ -134,10 +162,12 @@ class WhatsappManager {
 
     async disconnect(sessionId: string) {
         try {
+            await Session.updateOne({ id: sessionId }, { $set: { desiredState: "DISCONNECTED", updatedAt: new Date() } });
             const clientSession = this.sockets.get(sessionId);
             if (!clientSession) throw new SessionNotFoundError(sessionId);
 
             const sessionStatus = await clientSession.disconnect();
+            this.emit('logged.out', sessionId, 'Session manually disconnected');
             return sessionStatus;
         } finally {
             this.sockets.delete(sessionId);
@@ -158,38 +188,53 @@ class WhatsappManager {
         return await clientSession.sendTyping(phoneNumber);
     }
 
-    async sendMessage(sessionId: string, phoneNumber: string, msgText: string) {
+    async sendTypingPaused(sessionId: string, phoneNumber: string) {
+        const clientSession = this.sockets.get(sessionId);
+        if(!clientSession) throw new SessionNotFoundError(sessionId);
+        return await clientSession.sendTypingPaused(phoneNumber);
+    }
+
+    async sendMessage(sessionId: string, phoneNumber: string, msgText: string, customMessageId?: string) {
         const clientSession = this.sockets.get(sessionId);
         if(!clientSession) throw new SessionNotFoundError(sessionId);
 
-        return await clientSession.sendMessage(phoneNumber, msgText);
+        return await clientSession.sendMessage(phoneNumber, msgText, customMessageId);
     }
 
-    async sendMediaMessage(sessionId: string, phoneNumber: string, mediaType: string, mediaUrl: string, caption?: string) {
+    async sendMediaMessage(sessionId: string, phoneNumber: string, mediaType: string, mediaUrl: string, caption?: string, customMessageId?: string) {
         const clientSession = this.sockets.get(sessionId);
         if(!clientSession) throw new SessionNotFoundError(sessionId);
 
-        const message = await clientSession.sendMediaMessage(phoneNumber, mediaType, mediaUrl, caption);
+        const message = await clientSession.sendMediaMessage(phoneNumber, mediaType, mediaUrl, caption, customMessageId);
         return message;
     }
 
-    async sendMediaFile(sessionId: string, phoneNumber: string, file: Express.Multer.File, caption?: string) {
-       const clientSession = this.sockets.get(sessionId);
+    async sendMediaFile(
+        sessionId: string,
+        phoneNumber: string,
+        file: Express.Multer.File | { buffer?: Buffer; path?: string; mimetype: string; originalname: string },
+        caption?: string,
+        customMessageId?: string
+    ) {
+        const clientSession = this.sockets.get(sessionId);
         if(!clientSession) throw new SessionNotFoundError(sessionId);
         
-        const message = await clientSession.sendMediaFile(phoneNumber, file, caption);
+        const message = await clientSession.sendMediaFile(phoneNumber, file, caption, customMessageId);
         return message;
     }
 
-    async sendVoiceNote(sessionId: string, phoneNumber: string, file: Express.Multer.File) {
-       const clientSession = this.sockets.get(sessionId);
-       if(!clientSession) throw new SessionNotFoundError(sessionId);
+    async sendVoiceNote(
+        sessionId: string,
+        phoneNumber: string,
+        file: Express.Multer.File | { buffer?: Buffer; path?: string; mimetype: string; originalname?: string },
+        customMessageId?: string
+    ) {
+        const clientSession = this.sockets.get(sessionId);
+        if(!clientSession) throw new SessionNotFoundError(sessionId);
         
-        const message = await clientSession.sendVoiceNote(phoneNumber, file);
+        const message = await clientSession.sendVoiceNote(phoneNumber, file, customMessageId);
         return message;
     }
-
-
 
     async isOnWhatsapp(sessionId: string, phoneNumber: string) {
         const clientSession = this.sockets.get(sessionId);
@@ -199,11 +244,11 @@ class WhatsappManager {
         return isWhatsappAvailable;
     }
 
-    async deleteMessage(sessionId: string, msgKey: WAMessageKey) {
+    async deleteMessage(sessionId: string, msgKey: WAMessageKey, customMessageId?: string) {
         const clientSession = this.sockets.get(sessionId);
         if(!clientSession) throw new SessionNotFoundError(sessionId);
 
-        const message = await clientSession.deleteMessage(msgKey);
+        const message = await clientSession.deleteMessage(msgKey, customMessageId);
         return message;
     }
 
@@ -215,11 +260,11 @@ class WhatsappManager {
         return message;
     }
 
-    async reactMessage(sessionId: string, msgKey: WAMessageKey, emoji: string) {
+    async reactMessage(sessionId: string, msgKey: WAMessageKey, emoji: string, customMessageId?: string) {
         const clientSession = this.sockets.get(sessionId);
         if(!clientSession) throw new SessionNotFoundError(sessionId);
 
-        const message = await clientSession.reactMessage(msgKey, emoji);
+        const message = await clientSession.reactMessage(msgKey, emoji, customMessageId);
         return message;
     }
 }

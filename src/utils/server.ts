@@ -1,60 +1,53 @@
-import { writeFile, readFile, unlink, mkdir } from "fs/promises";
-import { dirname } from "path";
+import { readFile, unlink } from "fs/promises";
 import { whatsappService } from "../lib/whatsapp-manager.js";
-import { logBuffer } from "../lib/logger.js";
-import { Log } from "../data/db.js";
-import { logger } from "../lib/logger.js";
+import { outboxEngine } from "../lib/outbox.js";
+import { logBuffer, logger } from "../lib/logger.js";
+import { Log, Session } from "../data/db.js";
 
 const OUTPUT_PATH = "data/sessions.json";
 
 export async function handleStartup() {
-    let cachedSessions: Buffer;
+    await outboxEngine.start();
+
+    // Check if legacy data/sessions.json exists
     try {
-        cachedSessions = await readFile(OUTPUT_PATH);
-    } catch (err: any) {
-        if (err?.code === "ENOENT") {
-            logger.info("No cached sessions found on startup.");
-            return;
+        const cachedSessions = await readFile(OUTPUT_PATH);
+        const sessions = JSON.parse(cachedSessions.toString());
+        if (Array.isArray(sessions) && sessions.length > 0) {
+            logger.info(`Migrating ${sessions.length} legacy cached session(s) to MongoDB desiredState...`);
+            await Session.updateMany(
+                { id: { $in: sessions } },
+                { $set: { desiredState: "CONNECTED", updatedAt: new Date() } }
+            );
         }
-        logger.error(`Failed to read cached sessions file: ${err}`);
-        return;
+        await unlink(OUTPUT_PATH).catch(() => {});
+    } catch (err: any) {
+        if (err?.code !== "ENOENT") {
+            logger.warn(`Failed reading legacy cached sessions file: ${err}`);
+        }
     }
 
     try {
-        const sessions = JSON.parse(cachedSessions.toString());
-        if (!Array.isArray(sessions) || sessions.length === 0) {
-            logger.info("Cached sessions list is empty.");
-            await unlink(OUTPUT_PATH).catch(() => {});
-            return;
-        }
+        const activeSessions = await Session.find({ desiredState: "CONNECTED" });
+        logger.info(`Restoring ${activeSessions.length} active session(s) from MongoDB...`);
 
-        logger.info(`Restoring ${sessions.length} active session(s)...`);
-        for (const sessionId of sessions) {
-            try {
-                logger.info(`Reconnecting session: ${sessionId}`);
-                await whatsappService.connect(sessionId);
-            } catch (sessionErr) {
-                logger.error(`Failed to reconnect session ${sessionId} during startup: ${sessionErr}`);
-            }
+        for (const session of activeSessions) {
+            whatsappService.connect(session.id)
+                .then(() => {
+                    outboxEngine.kickSession(session.id);
+                })
+                .catch((sessionErr) => {
+                    logger.error(`Failed to reconnect session ${session.id} during startup: ${sessionErr}`);
+                });
         }
-        await unlink(OUTPUT_PATH).catch((unlinkErr) => {
-            logger.warn(`Failed to clean up cached sessions file: ${unlinkErr}`);
-        });
-        logger.info("Cold-start session recovery completed.");
+        logger.info("Cold-start session recovery initiated.");
     } catch (error) {
-        logger.error(`Error parsing or restoring sessions in handleStartup: ${error}`);
+        logger.error(`Error querying or restoring sessions in handleStartup: ${error}`);
     }
 }
 
 export async function handleShutdown() {
-    try {
-        const sessions = whatsappService.activeSessions;
-        await mkdir(dirname(OUTPUT_PATH), { recursive: true });
-        await writeFile(OUTPUT_PATH, JSON.stringify(sessions));
-        logger.info(`Persisted ${sessions.length} active session(s) to ${OUTPUT_PATH}`);
-    } catch (err) {
-        logger.error(`Failed to write shutdown sessions cache: ${err}`);
-    }
+    outboxEngine.stop();
 
     if (logBuffer.length > 0) {
         try {

@@ -6,11 +6,15 @@ export type WhatsappEvents = {
     qr: (apiKey: string, dataUrl: string) => void;
     message: (apiKey: string, data: WAMessage) => void;
     "message.update": (apiKey: string, update: any) => void;
+    "messages.update": (apiKey: string, updates: any[]) => void;
+    "logged.out": (sessionId: string, reason: string) => void;
 };
 
 export enum ConnectionStatus {
     CONNECTED = "connected",
     CONNECTING = "connecting",
+    RECONNECTING = "reconnecting",
+    DEGRADED = "degraded",
     DISCONNECTED = "disconnected",
 }
 
