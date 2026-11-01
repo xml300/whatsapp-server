@@ -57,8 +57,30 @@ export default function errorMiddleware(err: any, req: Request, res: Response, n
         });
     }
 
-    // 4. Default fallback
-    const statusCode = typeof err?.statusCode === "number" ? err.statusCode : 500;
+    // 4. Mongoose validation & duplicate key errors
+    if (err?.code === 11000) {
+        return res.status(409).json({
+            success: false,
+            error: {
+                code: 409,
+                message: "Duplicate resource conflict"
+            }
+        });
+    }
+
+    if (err?.name === "ValidationError") {
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 400,
+                message: err.message
+            }
+        });
+    }
+
+    // 5. Default fallback (supports err.statusCode and err.status like body-parser SyntaxError)
+    const rawStatus = err?.statusCode || err?.status;
+    const statusCode = typeof rawStatus === "number" && rawStatus >= 400 && rawStatus < 600 ? rawStatus : 500;
     return res.status(statusCode).json({
         success: false,
         error: {

@@ -43,6 +43,7 @@ router.post('/login', validate({
     return res.cookie('auth_token', token, {
         httpOnly: true,
         sameSite: 'strict',
+        secure: process.env.NODE_ENV === "production",
         maxAge: 1000 * 60 * 60
     }).json({
         success: true,
@@ -65,6 +66,18 @@ router.post('/register', validate({
     }
 }), async (req, res) => {
     const { username, password } = req.body;
+
+    const existingUser = await Users.getByUsername(username);
+    if (existingUser) {
+        return res.status(409).json({
+            success: false,
+            error: {
+                code: 409,
+                message: "Username already taken"
+            }
+        });
+    }
+
     const user = await Users.create({ username, password });
     const token = jwt.sign({ userId: user._id }, Config.JWT_SECRET, {
         expiresIn: "1h"
@@ -72,6 +85,7 @@ router.post('/register', validate({
     return res.cookie('auth_token', token, {
         httpOnly: true,
         sameSite: 'strict',
+        secure: process.env.NODE_ENV === "production",
         maxAge: 1000 * 60 * 60
     }).json({
         success: true,
@@ -85,5 +99,17 @@ router.post('/register', validate({
 
 });
 
+router.post('/logout', (req, res) => {
+    return res.clearCookie('auth_token', {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === "production"
+    }).json({
+        success: true,
+        data: {
+            message: "Logged out successfully"
+        }
+    });
+});
 
 export default router;

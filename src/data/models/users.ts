@@ -6,11 +6,6 @@ import type { IUser } from "../../types/models.js";
 
 export const Users = {
     create: async (data: Omit<IUser, "_id" | "createdAt" | "updatedAt">) => {
-        const existingUser = await User.findOne({ username: data.username });
-        if (existingUser) {
-            throw new Error("User already exists");
-        }
-
         const user = new User({
             _id: createHash('sha256').update(data.username).digest('hex'),
             username: data.username,

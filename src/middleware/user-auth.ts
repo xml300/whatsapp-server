@@ -3,18 +3,27 @@ import jwt, { type JwtPayload } from "jsonwebtoken";
 import { Config } from "../lib/config.js";
 
 export default function userAuthMiddleware(req: Request, res: Response, next: NextFunction){
-    const authToken = req.cookies.auth_token;
-    if(!authToken){
+    const authToken = req.cookies?.auth_token;
+    if(!authToken || typeof authToken !== "string"){
         return res.status(401).json({
             success: false,
             error: {
                 code: 401,
                 message: "Unauthorized"
             }
-        })
+        });
     }
     try {
         const payload = jwt.verify(authToken, Config.JWT_SECRET) as JwtPayload;
+        if (!payload || typeof payload !== "object" || typeof payload.userId !== "string") {
+            return res.status(401).json({
+                success: false,
+                error: {
+                    code: 401,
+                    message: "Unauthorized"
+                }
+            });
+        }
         res.locals.userId = payload.userId; 
         next();
     } catch (error) {

@@ -14,19 +14,28 @@ const app = express();
 const PORT = parseInt(process.env.PORT || "3000");
 
 app.use(loggingMiddleware);
-app.use(cookieParser());
-app.use(express.urlencoded({ extended: false }))
-app.use(express.json());
 app.use(cors({
-    origin: 'http://localhost:3000',
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
+    allowedHeaders: ['Content-Type', 'x-api-key'],
     credentials: true
 }));
-
+app.use(cookieParser());
+app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
 
 app.use('/api', platformRoutes);
 app.use('/api/v1', v1Routes);
+
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        error: {
+            code: 404,
+            message: `Route ${req.method} ${req.originalUrl} not found`
+        }
+    });
+});
 
 app.use(errorMiddleware);
 

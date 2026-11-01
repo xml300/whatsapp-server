@@ -49,10 +49,11 @@ async function log(msg: any, level: LogLevel, source?: string) {
     const id = globalThis.crypto.randomUUID();
     const timestamp = new Date().toISOString();
     const message = typeof msg === "string" ? msg : JSON.stringify(msg);
+    const cleanMessage = message.replace(/\x1b\[[0-9;]*m/g, "");
 
     logBuffer.push({
         id: id,
-        message: message,
+        message: cleanMessage,
         level: level,
         timestamp: new Date(),
         source: source || "system"

@@ -2,9 +2,9 @@ import type { NextFunction, Request, Response } from "express";
 import { ApiKeys } from "../data/models/api-keys.js";
 
 export default async function authMiddleware(req: Request, res: Response, next: NextFunction) {
-    const apiKey = req.headers["x-api-key"] as string;
+    const rawApiKey = req.headers["x-api-key"];
 
-    if(!apiKey){
+    if (!rawApiKey || typeof rawApiKey !== "string" || !rawApiKey.trim()) {
         return res.status(401).json({
             success: false,
             error: {
@@ -14,8 +14,9 @@ export default async function authMiddleware(req: Request, res: Response, next: 
         });
     }
 
+    const apiKey = rawApiKey.trim();
     const apiKeyData = await ApiKeys.get(apiKey);
-    if(!apiKeyData){
+    if (!apiKeyData) {
         return res.status(401).json({
             success: false,
             error: {
