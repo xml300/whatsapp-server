@@ -42,8 +42,8 @@ router.post('/login', validate({
     });
     return res.cookie('auth_token', token, {
         httpOnly: true,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === "production",
+        sameSite: 'none',
+        secure: true,
         maxAge: 1000 * 60 * 60
     }).json({
         success: true,
@@ -84,8 +84,8 @@ router.post('/register', validate({
     });
     return res.cookie('auth_token', token, {
         httpOnly: true,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === "production",
+        sameSite: 'none',
+        secure: true,
         maxAge: 1000 * 60 * 60
     }).json({
         success: true,
@@ -102,8 +102,8 @@ router.post('/register', validate({
 router.post('/logout', (req, res) => {
     return res.clearCookie('auth_token', {
         httpOnly: true,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === "production"
+        sameSite: 'none',
+        secure: true
     }).json({
         success: true,
         data: {

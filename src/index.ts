@@ -8,24 +8,55 @@ import { loggingMiddleware } from "./middleware/logging.js";
 import { logger } from "./lib/logger.js"; 
 import errorMiddleware from "./middleware/error.js";
 import cookieParser from "cookie-parser";
+import { platformOriginGuard } from "./middleware/origin-guard.js";
 import { handleShutdown, handleStartup } from "./utils/server.js"; 
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000");
 
+// Trust first proxy (Cloud Run, Render, ALB, Nginx) so req.secure and Set-Cookie Secure work properly
+app.set("trust proxy", 1);
+
 app.use(loggingMiddleware);
-app.use(cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+
+// Multi-origin parsing for CORS_ORIGIN (e.g. "https://bot-frontends.vercel.app,http://localhost:5173")
+const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:3000")
+    .split(",")
+    .map((o) => o.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+
+// 1. Strict CORS for Platform APIs (supports cookie credentials)
+const platformCors = cors({
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const normalized = origin.replace(/\/+$/, "");
+        if (allowedOrigins.includes("*") || allowedOrigins.includes(normalized)) {
+            return callback(null, true);
+        }
+        return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type'],
+    credentials: true
+});
+
+// 2. Open CORS for Gateway v1 APIs (authenticated via x-api-key header)
+const gatewayCors = cors({
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'x-api-key', 'Idempotency-Key', 'idempotency-key'],
-    credentials: true
-}));
+    credentials: false
+});
+
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
-app.use('/api', platformRoutes);
-app.use('/api/v1', v1Routes);
+// Platform routes guarded by strict CORS + origin guard
+app.use('/api', platformCors, platformOriginGuard, platformRoutes);
+
+// Gateway v1 routes open to any origin (secured by x-api-key)
+app.use('/api/v1', gatewayCors, v1Routes);
 
 app.use((req, res) => {
     res.status(404).json({
