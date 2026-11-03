@@ -1,4 +1,11 @@
-import { normalizePhoneNumber } from "./format.js";
+import {
+    normalizePhoneNumber,
+    formatGroupJid,
+    isValidGroupJid,
+    formatNewsletterJid,
+    isValidNewsletterJid,
+    normalizeParticipantJid
+} from "./format.js";
 
 export interface ValidationRule {
     validate: (value: any) => boolean | Promise<boolean>;
@@ -32,5 +39,50 @@ export const ruleRegistry: Record<string, ValidationRule> = {
         validate: (val) => typeof val === "boolean" || val === "true" || val === "false",
         transform: (val) => val === true || val === "true",
         message: "must be a boolean"
+    },
+    groupJid: {
+        validate: (val) => typeof val === "string" && formatGroupJid(val) !== null,
+        transform: (val) => formatGroupJid(val)!,
+        message: "Invalid or missing group JID (@g.us)"
+    },
+    channelJid: {
+        validate: (val) => typeof val === "string" && formatNewsletterJid(val) !== null,
+        transform: (val) => formatNewsletterJid(val)!,
+        message: "Invalid or missing channel JID (@newsletter)"
+    },
+    jid: {
+        validate: (val) =>
+            typeof val === "string" &&
+            (normalizeParticipantJid(val) !== null ||
+                isValidGroupJid(val) ||
+                isValidNewsletterJid(val) ||
+                val.trim() === "status@broadcast"),
+        transform: (val) => {
+            const normalized = normalizeParticipantJid(val);
+            if (normalized !== null) {
+                return normalized;
+            }
+            return typeof val === "string" ? val.trim() : val;
+        },
+        message: "Invalid WhatsApp JID or phone number"
+    },
+    number: {
+        validate: (val) =>
+            (typeof val === "number" && !Number.isNaN(val)) ||
+            (typeof val === "string" && val.trim() !== "" && !Number.isNaN(Number(val))),
+        transform: (val) => Number(val),
+        message: "must be a valid number"
+    },
+    array: {
+        validate: (val) => Array.isArray(val),
+        message: "must be an array"
+    },
+    nonEmptyArray: {
+        validate: (val) => Array.isArray(val) && val.length > 0,
+        message: "must be a non-empty array"
+    },
+    object: {
+        validate: (val) => typeof val === "object" && val !== null && !Array.isArray(val),
+        message: "must be an object"
     }
 };

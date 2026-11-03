@@ -24,7 +24,31 @@ export const Events = {
         }
 
         if (eventType) {
-            query.eventType = eventType;
+            if (!eventType.includes(",") && !eventType.includes("*")) {
+                query.eventType = eventType;
+            } else {
+                const tokens = eventType
+                    .split(",")
+                    .map((t) => t.trim())
+                    .filter(Boolean);
+
+                const patterns = tokens.map((token) => {
+                    if (token.endsWith(".*")) {
+                        const prefix = token.slice(0, -2);
+                        return new RegExp("^" + prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\.");
+                    }
+                    if (token === "*") {
+                        return new RegExp(".*");
+                    }
+                    return token;
+                });
+
+                if (patterns.length === 1 && typeof patterns[0] === "string") {
+                    query.eventType = patterns[0];
+                } else {
+                    query.eventType = { $in: patterns };
+                }
+            }
         }
 
         if (after) {
@@ -48,6 +72,19 @@ export const Events = {
             count: events.length,
             lastCursor
         };
+    },
+
+    findMessageById: async (userId: string, sessionId: string, messageId: string) => {
+        const doc = await Event.findOne({
+            userId,
+            sessionId,
+            eventType: "message",
+            "payload.key.id": messageId
+        })
+            .sort({ _id: -1 })
+            .lean();
+
+        return doc?.payload || null;
     },
 
     clearEventsForSession: async (userId: string, sessionId: string) => {

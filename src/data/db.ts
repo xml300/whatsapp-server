@@ -51,6 +51,9 @@ const apiKeySchema = new mongoose.Schema<IApiKey>({
     }
 });
 
+apiKeySchema.index({ apiKey: 1 }, { unique: true });
+apiKeySchema.index({ userId: 1 });
+
 const phoneNumbersSchema = new mongoose.Schema<IPhoneNumber>({
     userId: {
         type: String,
@@ -142,6 +145,7 @@ const eventSchema = new mongoose.Schema<IEvent>({
 
 eventSchema.index({ userId: 1, _id: 1 });
 eventSchema.index({ userId: 1, sessionId: 1, _id: 1 });
+eventSchema.index({ userId: 1, sessionId: 1, "payload.key.id": 1 });
 eventSchema.index({ createdAt: 1 }, { expireAfterSeconds: 259200 }); // 3 days TTL
 
 const outboxSchema = new mongoose.Schema<IOutbox>({
@@ -150,7 +154,32 @@ const outboxSchema = new mongoose.Schema<IOutbox>({
     idempotencyKey: { type: String, required: true },
     waMessageId: { type: String, required: true, index: true },
     recipientJid: { type: String, required: true },
-    actionType: { type: String, enum: ["text", "media_url", "media_file", "voice", "react", "delete", "read"], required: true },
+    actionType: {
+        type: String,
+        enum: [
+            "text",
+            "media_url",
+            "media_file",
+            "voice",
+            "sticker",
+            "poll",
+            "location",
+            "contact",
+            "react",
+            "edit",
+            "delete",
+            "read",
+            "pin",
+            "star",
+            "forward",
+            "status_text",
+            "status_media_url",
+            "status_media_file",
+            "status_voice",
+            "status_delete"
+        ],
+        required: true
+    },
     payload: { type: mongoose.Schema.Types.Mixed, required: true },
     simulateTyping: { type: Boolean, default: false },
     status: { type: String, enum: ["QUEUED", "PROCESSING", "DISPATCHED", "DELIVERED_TO_SERVER", "FAILED_TERMINAL", "CANCELLED"], default: "QUEUED", index: true },
@@ -165,7 +194,10 @@ const outboxSchema = new mongoose.Schema<IOutbox>({
 });
 
 outboxSchema.index({ sessionId: 1, idempotencyKey: 1 }, { unique: true });
+outboxSchema.index({ sessionId: 1, recipientJid: 1, status: 1, nextAttemptAt: 1, _id: 1 });
 outboxSchema.index({ sessionId: 1, status: 1, nextAttemptAt: 1, _id: 1 });
+outboxSchema.index({ status: 1, dispatchedAt: 1 });
+outboxSchema.index({ status: 1, nextAttemptAt: 1 });
 outboxSchema.index({ sessionId: 1, waMessageId: 1 });
 outboxSchema.index({ userId: 1, _id: 1 });
 outboxSchema.index({ createdAt: 1 }, { expireAfterSeconds: 259200 }); // 3 days TTL

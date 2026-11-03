@@ -157,6 +157,44 @@ flowchart TD
     - **Jitter**: Introduces a randomized delay of 300–800ms before message transmission.
     - **Presence Simulation**: When `simulateTyping: true` is requested, transmits an initial `sendTyping` presence stanza, waits 1000–2000ms, transmits `sendTypingPaused`, and finally dispatches the payload. This emulates natural human conversation cadence and avoids automated heuristic bans.
 
+### 3.3 Hybrid Execution Architecture: Asynchronous Outbox vs. Synchronous Control Plane
+
+The server partitions operations into two distinct execution tiers based on latency, delivery durability, and transport characteristics:
+
+1. **Asynchronous Durable Outbox Tier (`202 Accepted`)**:
+   - **Target Scope**:
+     - All 1:1 outbound dispatches (`<phoneNumber>@s.whatsapp.net`): text, media, files, voice notes, stickers, polls, locations, contact cards.
+     - All Group dispatches (`<groupJid>@g.us`): text, media, files, voice notes, stickers, polls, locations, contact cards.
+     - All Channel / Newsletter broadcasts (`<channelJid>@newsletter`): text, media, files.
+     - All Status stories (`status@broadcast`): status text, status media, status files, status voice notes.
+     - All message-level mutations: editing (`/messages/edit`), pinning (`/messages/pin`), starring (`/messages/star`), deleting (`/messages/delete`), marking read (`/messages/read`), reacting (`/messages/react`), forwarding (`/messages/forward`), and status removal (`DELETE /status/:messageId`).
+   - **Guarantees**:
+     - Immediate HTTP `202 Accepted` response with assigned `outboxId`, pre-allocated `waMessageId`, and `status: "queued"`.
+     - Transactional persistence in MongoDB before socket interaction.
+     - Sequential FIFO per-JID queuing (`ChatActor`), eliminating race conditions and Signal Double-Ratchet state desynchronization.
+     - Token bucket rate-limiting and human-cadence jitter (300–800ms) with optional presence simulation (`simulateTyping`).
+   - **Two Distinct Completion Models**:
+     - **Two-Stage ACK Completion (1:1, Group, and Status Messages)**:
+       Standard messages transition `QUEUED` -> `PROCESSING` -> `DISPATCHED`. Upon socket transmission, an in-memory 20-second timer is armed in `ackTimeouts`. The job only completes (`DELIVERED_TO_SERVER`) when WhatsApp edge servers emit a binary `SERVER_ACK` receipt stanza (receipt status $\ge 2$). If the ACK times out or the socket drops, the message is replayed with the **identical deterministic `waMessageId`**, guaranteeing at-least-once delivery without duplicate display on the recipient's handset.
+     - **Immediate Completion (`read`, `star`, `status_delete`, and `@newsletter`)**:
+       Actions that do not generate standard individual message ACK stanzas from the WhatsApp infrastructure complete immediately upon successful Baileys socket dispatch:
+       - `read`: Transmits `readMessages` stanza.
+       - `star`: Updates local star state and syncs app state.
+       - `status_delete`: Revokes status story stanza.
+       - `@newsletter` dispatches: Channel broadcasts follow a pub/sub tree distribution without per-recipient message ACK stanzas.
+       For these operations, `OutboxEngine` transitions the job directly to `DELIVERED_TO_SERVER` upon successful socket execution, unlinks any staged disk media, and persists `message.delivered` without arming a 20-second ACK timer.
+
+2. **Synchronous Control Plane Tier (`200 OK`)**:
+   - **Target Scope**:
+     - **Group Management**: Group creation (`POST /groups`), metadata inspection (`GET /groups/:groupJid`), participating group list (`GET /groups`), subject/description updates, setting modifiers (announcement, edit restrictions, approval mode, ephemeral expiration), group picture updates/removals, participant membership (add, remove, promote, demote), invite code management (retrieve, revoke, accept), and join request approvals/rejections.
+     - **Channel Management**: Newsletter creation (`POST /channels`), metadata queries, info/picture updates, deletion, follow/unfollow, mute/unmute, subscriber lists, admin reaction stanzas, historical message retrieval, admin counts, ownership transfers, and admin demotions.
+     - **Profile & Privacy**: Profile display name updates, status updates, profile picture updates/removals, privacy setting queries and updates.
+     - **Contact Management & Security**: Phone number WhatsApp registration checks, contact profile queries, blocklist inspection, and contact block/unblock stanzas.
+     - **Presence & Chat Modifiers**: Live presence broadcasts (`composing`, `recording`, `paused`, `available`, `unavailable`), presence subscriptions, and chat modifiers (archive, pin, mute).
+   - **Guarantees**:
+     - Direct real-time execution over the active Baileys WebSocket instance.
+     - Returns HTTP `200 OK` with immediate server payload or throws standard structured HTTP `4xx`/`5xx` errors if WhatsApp rejects the request (e.g. insufficient admin privileges or invalid target).
+
 ---
 
 ## 4. WhatsApp Multi-Device Lifecycle & Connection State Machine
@@ -256,7 +294,7 @@ The messaging pipeline uses a persistent MongoDB Outbox pattern to guarantee at-
 
 ```mermaid
 stateDiagram-v2
-    [*] --> QUEUED: POST /api/v1/send/* (202 Accepted)
+    [*] --> QUEUED: POST /api/v1/send/*, /groups/*/send/*, /channels/*/send/*, /status/* (202 Accepted)
     
     QUEUED --> PROCESSING: ChatActor picks next eligible job
     note right of PROCESSING
@@ -264,7 +302,14 @@ stateDiagram-v2
         Anti-ban jitter / simulateTyping executed
     end note
 
-    PROCESSING --> DISPATCHED: socket.sendMessage executed
+    PROCESSING --> DELIVERED_TO_SERVER: Immediate completion (read, star, status_delete, @newsletter)
+    note right of DELIVERED_TO_SERVER
+        Immediate DB completion
+        Staged media file unlinked
+        message.delivered event persisted
+    end note
+
+    PROCESSING --> DISPATCHED: Standard 1:1, group, or status dispatch
     note right of DISPATCHED
         waMessageId registered
         20s ACK timer armed in ackTimeouts
@@ -422,13 +467,107 @@ sequenceDiagram
 ```
 
 Event categories recorded in the `events` collection include:
-- `message`: Incoming and outgoing chat messages.
-- `message.update`: Status updates (sent, delivered, read receipts).
-- `message.sent`: Dispatched to WhatsApp edge servers.
-- `message.delivered`: Two-stage `SERVER_ACK` received from WhatsApp.
-- `message.failed`: Terminal delivery failure with error details.
-- `connection`: Status transitions (`CONNECTING`, `CONNECTED`, `RECONNECTING`, `DEGRADED`, `DISCONNECTED`).
-- `qr`: Fresh QR code authentication strings.
+- **Core & Outbox**:
+  - `connection`: Status transitions (`CONNECTING`, `CONNECTED`, `RECONNECTING`, `DEGRADED`, `DISCONNECTED`).
+  - `qr`: Fresh QR code authentication strings.
+  - `message`: Incoming and outgoing chat messages.
+  - `message.update`: Status updates (sent, delivered, read receipts) and message edit updates.
+  - `message.edited`: Dedicated event emitted when an edited message is received.
+  - `message.delete`: Message revocation/deletion stanzas.
+  - `message.reaction`: Emoji reactions added or removed.
+  - `poll.vote`: Automatically decrypted poll votes containing selected plain-text options and voter identity.
+  - `message.sent`: Dispatched to WhatsApp edge servers.
+  - `message.delivered`: Delivery confirmation (via two-stage `SERVER_ACK` or immediate completion).
+  - `message.failed`: Terminal delivery failure with error details.
+- **Groups**:
+  - `group.upsert`: Group creation, join, or bulk sync event.
+  - `group.update`: Group subject, description, or setting changes.
+  - `group.participants`: Participant added, removed, promoted to admin, or demoted.
+  - `group.join_request`: Join approval requests in membership approval-enabled groups.
+- **Channels (Newsletters)**:
+  - `channel.reaction`: Reactions to channel broadcast messages.
+  - `channel.view`: Channel view count updates.
+  - `channel.participants`: Channel subscriber count updates.
+  - `channel.settings`: Channel metadata or setting modifications.
+- **Presence & Calls**:
+  - `presence.update`: User online/offline, composing, or recording presence stanzas.
+  - `call`: Incoming call notifications and call stanzas.
+
+### 7.1 Automatic `poll.vote` Decryption Pipeline
+
+WhatsApp encrypts user votes on interactive polls using the Signal Protocol message secret associated with the original poll creation message. By default, incoming poll updates (`messages.upsert` containing a `pollUpdateMessage`) arrive as opaque encrypted byte buffers.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Voter as WhatsApp User (Voter)
+    participant Socket as Baileys Socket
+    participant Svc as WhatsappService
+    participant DB as MongoDB (Events & Outbox)
+    participant Client as Webhook / Polling Client
+
+    Voter->>Socket: Submits vote stanza (pollUpdateMessage)
+    Socket->>Svc: messages.upsert event
+    Svc->>Svc: Detect message.pollUpdateMessage
+    Svc->>DB: resolveWAMessageById(pollCreationMessageKey.id)
+    DB-->>Svc: Original poll creation WAMessage
+    Svc->>Svc: Extract messageSecret & candidate option SHA-256 hashes
+    Svc->>Svc: decryptPollVote(vote, { pollCreatorJid, pollMsgId, pollEncKey, voterJid })
+    Svc->>Svc: Map decrypted hashes to plain-text option names
+    Svc->>DB: Events.create({ eventType: "poll.vote", payload: { pollMessageKey, voterJid, selectedOptions, timestampMs } })
+    Client->>DB: GET /api/v1/events?eventType=poll.vote
+    DB-->>Client: Returns decrypted vote with plain-text option names
+```
+
+1. **Detection**: When an incoming message contains `message.pollUpdateMessage`, `WhatsappService` identifies the vote.
+2. **Key Resolution**: The server extracts `pollCreationMessageKey.id` and queries `resolveWAMessageById()` to retrieve the original poll creation message.
+3. **Decryption**: If the poll creation message is resolved and contains `messageSecret`, Baileys' `decryptPollVote` computes the voter's selections.
+4. **Option Mapping**: Selected SHA-256 hashes are matched against the hash of each option in the original `pollCreationMessage` (`v1`, `v2`, or `v3`).
+5. **Persistence**: The server stores an explicit `poll.vote` event in MongoDB containing:
+   - `pollMessageKey`: Key of the target poll message.
+   - `voteMessageKey`: Key of the vote update stanza.
+   - `voterJid`: Normalized WhatsApp JID of the voter.
+   - `selectedOptions`: Array of human-readable option title strings chosen by the voter.
+   - `timestampMs`: Timestamp of the vote.
+
+### 7.2 `getMessage` Historical Message Resolution Hook
+
+The Baileys WebSocket instance requires a `getMessage: (key: WAMessageKey) => Promise<WAMessageContent | undefined>` callback to resolve historical stanzas for end-to-end cryptographic operations:
+- Decrypting poll update messages (`pollUpdateMessage`).
+- Constructing context for quoted replies (`quoted`).
+- Resolving original messages for forward dispatches (`forward`).
+
+The WhatsApp Server implements a dual-store resolution strategy in `resolveWAMessageById(messageId)`:
+
+```mermaid
+flowchart TD
+    Start["resolveWAMessageById(messageId)"] --> Q1["Query MongoDB: Events.findMessageById\n{ userId, sessionId, eventType: 'message', 'payload.key.id': messageId }"]
+    Q1 -- Found in Events --> ReturnMsg["Return message payload"]
+    Q1 -- Not Found --> Q2["Query MongoDB: Outbox.findOne\n{ sessionId, waMessageId: messageId }"]
+    Q2 -- Found in Outbox --> ExtractSent["Extract payload.sentMessage\n(Serialized with BufferJSON.replacer)"]
+    ExtractSent --> ReturnMsg
+    Q2 -- Not Found --> ReturnNull["Return null / undefined"]
+```
+
+1. **Inbound Event Index**: First queries incoming events via `Events.findMessageById(userId, sessionId, messageId)`. This lookup is accelerated by the compound index `{ userId: 1, sessionId: 1, "payload.key.id": 1 }`.
+2. **Outbound Archive Fallback**: If not found in inbound events (e.g., when decrypting a vote on a poll created by the server itself), queries `Outbox.findOne({ sessionId, waMessageId: messageId })`. Outbound messages persist the full Baileys `WAMessage` object in `payload.sentMessage` upon dispatch (serialized via `BufferJSON.replacer` so that embedded binary keys like `messageSecret` remain intact).
+
+### 7.3 `cachedGroupMetadata` In-Memory Caching & Event-Driven Invalidation
+
+Frequent group operations (such as group send requests, permission checks, and `@all` member mentions expansion) require access to group metadata (`GroupMetadata`: participants, admin roles, settings). Repeated socket queries to WhatsApp edge servers induce latency and risk throttling.
+
+To optimize performance:
+1. **In-Memory Cache**: `WhatsappService` maintains a private `groupCache = new Map<string, { data: GroupMetadata; expiresAt: number }>()` with a **5-minute (300,000ms)** TTL.
+2. **Socket Hook Registration**: Passed to Baileys `makeWASocket` as:
+   ```typescript
+   cachedGroupMetadata: async (jid) => {
+       const entry = this.groupCache.get(jid);
+       return (entry && entry.expiresAt > Date.now()) ? entry.data : undefined;
+   }
+   ```
+3. **Event-Driven Cache Coherence**:
+   - **Cache Populate**: Automatically cached whenever `groupMetadata(groupJid)` is invoked or when receiving `groups.upsert` during initial socket synchronization.
+   - **Cache Invalidation**: Whenever Baileys emits a `groups.update` or `group-participants.update` event, the server immediately evicts the affected group ID via `this.groupCache.delete(update.id)`, ensuring participant or permission modifications are reflected immediately without waiting for TTL expiration.
 
 ---
 

@@ -1,0 +1,17 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'ghcr.io/xml300/whatsapp-api:latest', '.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "$$GHCR_TOKEN" | docker login ghcr.io -u xml300 --password-stdin
+        docker push ghcr.io/xml300/whatsapp-api:latest
+    secretEnv: ['GHCR_TOKEN']
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/hosting-72ffb/secrets/ghcr-token/versions/latest
+      env: 'GHCR_TOKEN'

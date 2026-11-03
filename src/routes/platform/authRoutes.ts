@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type CookieOptions } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { Users } from "../../data/models/users.js";
@@ -6,6 +6,19 @@ import validate from "../../middleware/validate.js";
 import { Config } from "../../lib/config.js";
 
 const router = Router();
+
+function getAuthCookieOptions(req: Request, includeMaxAge = true): CookieOptions {
+    const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
+    const isSecure = process.env.NODE_ENV === "production" || req.secure || forwardedProto === "https";
+    return {
+        httpOnly: true,
+        sameSite: isSecure ? "none" : "lax",
+        secure: isSecure,
+        partitioned: isSecure,
+        path: "/",
+        ...(includeMaxAge ? { maxAge: 1000 * 60 * 60 } : {})
+    };
+}
 
 router.post('/login', validate({
     body: {
@@ -40,12 +53,7 @@ router.post('/login', validate({
     const token = jwt.sign({ userId: user._id }, Config.JWT_SECRET, {
         expiresIn: "1h"
     });
-    return res.cookie('auth_token', token, {
-        httpOnly: true,
-        sameSite: 'none',
-        secure: true,
-        maxAge: 1000 * 60 * 60
-    }).json({
+    return res.cookie('auth_token', token, getAuthCookieOptions(req, true)).json({
         success: true,
         data: {
             user: {
@@ -82,12 +90,7 @@ router.post('/register', validate({
     const token = jwt.sign({ userId: user._id }, Config.JWT_SECRET, {
         expiresIn: "1h"
     });
-    return res.cookie('auth_token', token, {
-        httpOnly: true,
-        sameSite: 'none',
-        secure: true,
-        maxAge: 1000 * 60 * 60
-    }).json({
+    return res.cookie('auth_token', token, getAuthCookieOptions(req, true)).json({
         success: true,
         data: {
             user: {
@@ -100,11 +103,7 @@ router.post('/register', validate({
 });
 
 router.post('/logout', (req, res) => {
-    return res.clearCookie('auth_token', {
-        httpOnly: true,
-        sameSite: 'none',
-        secure: true
-    }).json({
+    return res.clearCookie('auth_token', getAuthCookieOptions(req, false)).json({
         success: true,
         data: {
             message: "Logged out successfully"

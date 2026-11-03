@@ -112,6 +112,33 @@ components:
           type: string
           example: "2348012345678"
 
+    LiveSessionItem:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "d41d8cd98f00b204e9800998ecf8427e"
+        userId:
+          type: string
+          example: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+        phoneNumber:
+          type: string
+          example: "2348012345678"
+        desiredState:
+          type: string
+          enum: [CONNECTED, DISCONNECTED]
+          example: "CONNECTED"
+        isConnected:
+          type: boolean
+          example: true
+        isPairingReady:
+          type: boolean
+          example: false
+        status:
+          type: string
+          enum: [connected, connecting, reconnecting, degraded, disconnected]
+          example: "connected"
+
     LogItem:
       type: object
       properties:
@@ -187,7 +214,7 @@ components:
           example: "2348012345678@s.whatsapp.net"
         actionType:
           type: string
-          enum: [text, media_url, media_file, voice, react, delete, read]
+          enum: [text, media_url, media_file, voice, sticker, poll, location, contact, react, edit, delete, read, pin, star, forward, status_text, status_media_url, status_media_file, status_voice, status_delete]
           example: "text"
         payload:
           type: object
@@ -224,6 +251,50 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    QuotedMessageInput:
+      type: object
+      properties:
+        messageId:
+          type: string
+          description: Unique WhatsApp message ID of the message to quote
+          example: "3EB091AE751D87A0"
+        remoteJid:
+          type: string
+          description: JID of the chat where quoted message exists
+          example: "2348012345678@s.whatsapp.net"
+        participant:
+          type: string
+          description: Participant JID for group quoted messages
+          example: "2348011223344@s.whatsapp.net"
+        fromMe:
+          type: boolean
+          description: Whether quoted message was sent by the active session
+          example: false
+        text:
+          type: string
+          description: Text content of quoted message
+          example: "Original quoted message"
+        rawMessage:
+          type: object
+          description: Raw Baileys message object
+
+    ContactCardInput:
+      type: object
+      required:
+        - displayName
+      properties:
+        displayName:
+          type: string
+          description: Full display name for contact card
+          example: "Ada Lovelace"
+        phoneNumber:
+          type: string
+          description: Contact telephone number
+          example: "+2348012345678"
+        vcard:
+          type: string
+          description: Optional pre-formatted custom vCard 3.0 string
 
 paths:
   /api/health:
@@ -522,6 +593,33 @@ paths:
         '401':
           description: Unauthorized.
 
+  /api/v1/sessions:
+    get:
+      summary: List User WhatsApp Sessions with Live Status
+      description: Returns all configured WhatsApp session records for the authenticated user along with live Baileys connection statuses.
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Sessions list with live status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      sessions:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/LiveSessionItem'
+        '401':
+          description: Unauthorized or missing/invalid API key.
+
   /api/v1/connection:
     post:
       summary: Connect WhatsApp Session
@@ -724,7 +822,13 @@ paths:
   /api/v1/events:
     get:
       summary: Poll WhatsApp Events
-      description: Retrieve persisted WhatsApp events (incoming messages, message receipts, connection state changes) with cursor-based pagination.
+      description: |
+        Retrieve persisted WhatsApp events (incoming messages, poll votes, message receipts, group/channel updates, connection state changes) with cursor-based pagination.
+        Supported event types include:
+        - Core & Outbox: connection, qr, message, message.update, message.edited, message.delete, message.reaction, poll.vote, message.sent, message.delivered, message.failed
+        - Groups: group.upsert, group.update, group.participants, group.join_request
+        - Channels: channel.reaction, channel.view, channel.participants, channel.settings
+        - Presence & Calls: presence.update, call
       security:
         - ApiKeyAuth: []
       parameters:
@@ -739,7 +843,7 @@ paths:
           required: false
           schema:
             type: string
-          description: Filter by event type (e.g. message, message.update, connection, qr).
+          description: Filter by event type. Supports single event types (e.g. message), comma-separated lists (e.g. message,poll.vote,group.participants), and wildcard prefix patterns (e.g. group.*, channel.*, message.*, *).
         - name: after
           in: query
           required: false
@@ -915,6 +1019,18 @@ paths:
                   type: boolean
                   description: Whether to simulate human typing indicator before dispatch
                   example: false
+                mentions:
+                  type: array
+                  items:
+                    type: string
+                  description: Array of phone numbers or JIDs to mention
+                  example: ["08011223344"]
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+                  description: Shorthand message ID to quote
+                  example: "3EB091AE751D87A0" 
       responses:
         '202':
           description: Message queued in outbox for resilient delivery.
@@ -971,6 +1087,16 @@ paths:
                   type: boolean
                   description: Whether to simulate human typing indicator before dispatch
                   example: false
+                viewOnce:
+                  type: boolean
+                  description: When true, sends media as a view-once asset
+                  example: false
+                mentions:
+                  type: string
+                  description: JSON array string of phone numbers or JIDs to mention
+                quotedMessageId:
+                  type: string
+                  description: Shorthand message ID to quote
       responses:
         '202':
           description: Media file staged and queued in outbox for resilient delivery.
@@ -1034,6 +1160,20 @@ paths:
                   type: boolean
                   description: Whether to simulate human typing indicator before dispatch
                   example: false
+                viewOnce:
+                  type: boolean
+                  description: When true, sends media as a view-once asset
+                  example: false
+                mentions:
+                  type: array
+                  items:
+                    type: string
+                  description: Array of phone numbers or JIDs to mention
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+                  description: Shorthand message ID to quote
       responses:
         '202':
           description: Media queued in outbox for resilient delivery.
@@ -1086,6 +1226,13 @@ paths:
                   type: boolean
                   description: Whether to simulate human typing indicator before dispatch
                   example: false
+                viewOnce:
+                  type: boolean
+                  description: When true, sends audio as view-once
+                  example: false
+                quotedMessageId:
+                  type: string
+                  description: Shorthand message ID to quote
       responses:
         '202':
           description: Voice note queued in outbox for resilient delivery.
@@ -1511,3 +1658,2532 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StandardErrorResponse'
+
+
+  /api/v1/send/sticker:
+    post:
+      summary: Send Sticker
+      description: Queues a WebP sticker in the outbox for resilient asynchronous delivery. Supports both multipart binary upload and remote image/sticker URL.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - phoneNumber
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                phoneNumber:
+                  type: string
+                  description: Target recipient phone number
+                  example: "08012345678"
+                file:
+                  type: string
+                  format: binary
+                  description: Sticker WebP or image binary file
+                mediaUrl:
+                  type: string
+                  description: Remote URL of sticker image
+                isAnimated:
+                  type: boolean
+                  description: Whether sticker is animated
+                  example: false
+                quotedMessageId:
+                  type: string
+                  description: Optional message ID to reply to
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - phoneNumber
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                phoneNumber:
+                  type: string
+                  example: "08012345678"
+                mediaUrl:
+                  type: string
+                  format: uri
+                  example: "https://example.com/sticker.webp"
+                isAnimated:
+                  type: boolean
+                  example: false
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+      responses:
+        '202':
+          description: Sticker queued in outbox for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/send/poll:
+    post:
+      summary: Send Interactive Poll
+      description: Queues an interactive multi-choice poll message in the outbox. Voter selections are automatically decrypted when received.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - phoneNumber
+                - name
+                - values
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                phoneNumber:
+                  type: string
+                  example: "08012345678"
+                name:
+                  type: string
+                  description: Poll question title
+                  example: "Which feature should we build next?"
+                values:
+                  type: array
+                  items:
+                    type: string
+                  description: Candidate option choices (2 to 12 items)
+                  example: ["Dark Mode", "Export to CSV", "Webhooks"]
+                selectableCount:
+                  type: integer
+                  description: Maximum selections allowed per voter (default 1)
+                  example: 1
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+      responses:
+        '202':
+          description: Poll queued in outbox for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/send/location:
+    post:
+      summary: Send Location Pin
+      description: Queues a geographic coordinate pin or venue card in the outbox.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - phoneNumber
+                - latitude
+                - longitude
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                phoneNumber:
+                  type: string
+                  example: "08012345678"
+                latitude:
+                  type: number
+                  example: 6.5244
+                longitude:
+                  type: number
+                  example: 3.3792
+                name:
+                  type: string
+                  example: "Lagos Headquarters"
+                address:
+                  type: string
+                  example: "12 Marina Road, Lagos Island, Nigeria"
+                url:
+                  type: string
+                  format: uri
+                  example: "https://maps.google.com"
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+      responses:
+        '202':
+          description: Location queued in outbox for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/send/contact:
+    post:
+      summary: Send Contact Card(s)
+      description: Queues one or multiple vCard 3.0 contact cards in the outbox.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - phoneNumber
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                phoneNumber:
+                  type: string
+                  example: "08012345678"
+                displayName:
+                  type: string
+                  example: "Ada Lovelace"
+                phoneNumberCard:
+                  type: string
+                  description: Phone number for single card shorthand
+                  example: "+2348011223344"
+                vcard:
+                  type: string
+                  description: Raw vCard 3.0 string
+                contacts:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ContactCardInput'
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+      responses:
+        '202':
+          description: Contact card(s) queued in outbox for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/messages/edit:
+    post:
+      summary: Edit Sent Text Message
+      description: "Queues a text message edit mutation in the outbox. Only messages sent by your session (`fromMe: true`) can be edited."
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - messageId
+                - remoteJid
+                - message
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                messageId:
+                  type: string
+                  example: "3EB091AE751D87A0"
+                remoteJid:
+                  type: string
+                  example: "2348012345678@s.whatsapp.net"
+                message:
+                  type: string
+                  description: Replacement text content
+                  example: "Updated message text"
+                fromMe:
+                  type: boolean
+                  default: true
+                  example: true
+      responses:
+        '202':
+          description: Message edit queued in outbox for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/messages/pin:
+    post:
+      summary: Pin or Unpin Message
+      description: Queues a pin or unpin action for a message in 1:1 or group conversation.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - messageId
+                - remoteJid
+                - action
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                messageId:
+                  type: string
+                  example: "3EB091AE751D87A0"
+                remoteJid:
+                  type: string
+                  example: "2348012345678@s.whatsapp.net"
+                action:
+                  type: string
+                  enum: [pin, unpin]
+                  example: "pin"
+                time:
+                  type: integer
+                  description: Duration to pin in seconds (86400, 604800, 2592000)
+                  enum: [86400, 604800, 2592000]
+                  default: 86400
+                  example: 86400
+                fromMe:
+                  type: boolean
+                  example: true
+      responses:
+        '202':
+          description: Pin action queued in outbox for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/messages/star:
+    post:
+      summary: Star or Unstar Message
+      description: Stars or unstars a message in chat history. Completes immediately upon socket dispatch.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - messageId
+                - remoteJid
+                - star
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                messageId:
+                  type: string
+                  example: "3EB091AE751D87A0"
+                remoteJid:
+                  type: string
+                  example: "2348012345678@s.whatsapp.net"
+                star:
+                  type: boolean
+                  description: True to star, false to unstar
+                  example: true
+                fromMe:
+                  type: boolean
+                  example: false
+      responses:
+        '202':
+          description: Star action queued in outbox for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/messages/forward:
+    post:
+      summary: Forward Message
+      description: Forwards an existing message to another chat or group without re-uploading media assets. Automatically resolves historic stanzas from event store or outbox archive.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                recipientJid:
+                  type: string
+                  description: Destination JID or phone number
+                  example: "2348099887766@s.whatsapp.net"
+                phoneNumber:
+                  type: string
+                  description: Destination phone number (shorthand for recipientJid)
+                  example: "08099887766"
+                messageId:
+                  type: string
+                  description: Original WhatsApp message ID to forward
+                  example: "3EB091AE751D87A0"
+                remoteJid:
+                  type: string
+                  description: Chat JID of the original message
+                  example: "2348012345678@s.whatsapp.net"
+                fromMe:
+                  type: boolean
+                  example: false
+                force:
+                  type: boolean
+                  description: Force forward flag
+                  example: false
+      responses:
+        '202':
+          description: Forward action queued in outbox for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid API key.
+        '404':
+          description: Target message not found in history.
+        '500':
+          description: Internal server error.
+
+  /api/v1/presence:
+    post:
+      summary: Broadcast User Presence State
+      description: Broadcasts composing, recording, or online availability presence to a specific chat or globally across WhatsApp. Synchronous control plane operation.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - presence
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                presence:
+                  type: string
+                  enum: [composing, recording, paused, available, unavailable]
+                  example: "composing"
+                toJid:
+                  type: string
+                  description: Optional target conversation JID or phone number
+                  example: "2348012345678@s.whatsapp.net"
+      responses:
+        '200':
+          description: Presence broadcasted successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: "Presence updated successfully"
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid API key.
+        '500':
+          description: Internal server error.
+
+  /api/v1/presence/subscribe:
+    post:
+      summary: Subscribe to Contact Presence
+      description: Subscribes to live presence updates for a specific contact or group.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - toJid
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                toJid:
+                  type: string
+                  description: Target contact or group JID
+                  example: "2348012345678@s.whatsapp.net"
+      responses:
+        '200':
+          description: Subscribed to presence updates.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: "Subscribed to presence updates"
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid API key.
+
+  /api/v1/chats/{jid}/modify:
+    post:
+      summary: Modify Chat State (Archive, Pin, Mute)
+      description: Applies conversation state modifications (archive/unarchive, pin/unpin, mute/unmute) directly over the active socket.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: jid
+          required: true
+          schema:
+            type: string
+          description: Target conversation JID (user @s.whatsapp.net or group @g.us)
+          example: "2348012345678@s.whatsapp.net"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - action
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                action:
+                  type: string
+                  enum: [archive, unarchive, pin, unpin, mute, unmute]
+                  example: "mute"
+                muteDurationMs:
+                  type: integer
+                  description: Duration in milliseconds when muting (e.g. 28800000 for 8 hours)
+                  example: 28800000
+      responses:
+        '200':
+          description: Chat modified successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: "Chat modified successfully"
+        '400':
+          description: Validation failure.
+        '401':
+          description: Invalid API key.
+
+  /api/v1/groups:
+    get:
+      summary: Fetch Participating Groups
+      description: Retrieves all WhatsApp groups in which the active session is currently participating.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+          description: WhatsApp session ID
+      responses:
+        '200':
+          description: List of participating groups.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      groups:
+                        type: array
+                        items:
+                          type: object
+        '401':
+          description: Invalid API key.
+    post:
+      summary: Create New Group
+      description: Creates a new WhatsApp group with initial participants.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - subject
+                - participants
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                subject:
+                  type: string
+                  description: Title of group
+                  example: "Engineering Guild"
+                participants:
+                  type: array
+                  items:
+                    type: string
+                  description: Initial participant phone numbers or JIDs
+                  example: ["08011223344", "08055667788"]
+      responses:
+        '200':
+          description: Group created successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      group:
+                        type: object
+
+  /api/v1/groups/accept-invite:
+    post:
+      summary: Join Group via Invite Code
+      description: Joins a WhatsApp group using its invite code link snippet.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - code
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+                code:
+                  type: string
+                  description: Group invite code string (from chat.whatsapp.com/<code>)
+                  example: "C7Xz8yA1b2c"
+      responses:
+        '200':
+          description: Joined group successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      groupJid:
+                        type: string
+                        example: "123456789-987654@g.us"
+
+  /api/v1/groups/invite-info/{code}:
+    get:
+      summary: Get Group Metadata by Invite Code
+      description: Inspects group subject, size, and metadata from an invite code prior to joining.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: string
+          description: Group invite code
+          example: "C7Xz8yA1b2c"
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Group metadata for invite code.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+
+  /api/v1/groups/{groupJid}:
+    get:
+      summary: Get Group Metadata
+      description: Retrieves detailed metadata (participants, admin roles, settings) for a specific group. Cached in memory for 5 minutes with event-driven invalidation.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+          description: Group JID (@g.us)
+          example: "123456789-987654@g.us"
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Group metadata retrieved.
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/groups/{groupJid}/leave:
+    post:
+      summary: Leave Group
+      description: Leaves a WhatsApp group.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+          example: "123456789-987654@g.us"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                  example: "d41d8cd98f00b204e9800998ecf8427e"
+      responses:
+        '200':
+          description: Left group successfully.
+
+  /api/v1/groups/{groupJid}/subject:
+    patch:
+      summary: Update Group Subject
+      description: Updates the subject/title of a group.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - subject
+              properties:
+                sessionId:
+                  type: string
+                subject:
+                  type: string
+                  example: "Updated Team Title"
+      responses:
+        '200':
+          description: Group subject updated.
+
+  /api/v1/groups/{groupJid}/description:
+    patch:
+      summary: Update Group Description
+      description: Updates group description text.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - description
+              properties:
+                sessionId:
+                  type: string
+                description:
+                  type: string
+                  example: "New official description"
+      responses:
+        '200':
+          description: Group description updated.
+
+  /api/v1/groups/{groupJid}/settings:
+    patch:
+      summary: Update Group Operational Settings
+      description: Updates group announcement mode, member editing rights, join approval mode, and disappearing message timers.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                setting:
+                  type: string
+                  enum: [announcement, not_announcement, locked, unlocked]
+                memberAddMode:
+                  type: string
+                  enum: [admin_add, all_member_add]
+                joinApprovalMode:
+                  type: string
+                  enum: ["on", "off"]
+                ephemeralExpiration:
+                  type: integer
+                  description: Disappearing messages TTL in seconds
+                  example: 604800
+      responses:
+        '200':
+          description: Group settings updated.
+
+  /api/v1/groups/{groupJid}/picture:
+    put:
+      summary: Update Group Profile Picture
+      description: Updates group icon via multipart file upload or remote image URL.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - imageUrl
+              properties:
+                sessionId:
+                  type: string
+                imageUrl:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: Group picture updated.
+    delete:
+      summary: Remove Group Profile Picture
+      description: Removes group icon.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: sessionId
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Group picture removed.
+
+  /api/v1/groups/{groupJid}/participants:
+    post:
+      summary: Add, Remove, Promote, or Demote Group Participants
+      description: Modifies membership or admin status of group participants.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - participants
+                - action
+              properties:
+                sessionId:
+                  type: string
+                participants:
+                  type: array
+                  items:
+                    type: string
+                  example: ["08012345678"]
+                action:
+                  type: string
+                  enum: [add, remove, promote, demote]
+                  example: "add"
+      responses:
+        '200':
+          description: Participant update executed.
+
+  /api/v1/groups/{groupJid}/invite-code:
+    get:
+      summary: Get Group Invite Code
+      description: Retrieves the active group invite link code.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invite code returned.
+
+  /api/v1/groups/{groupJid}/revoke-invite:
+    post:
+      summary: Revoke Group Invite Code
+      description: Revokes active invite code and generates a new one.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: Invite code revoked and regenerated.
+
+  /api/v1/groups/{groupJid}/join-requests:
+    get:
+      summary: List Group Join Requests
+      description: Lists pending participant requests for groups with membership approval enabled.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Join requests listed.
+    post:
+      summary: Approve or Reject Join Requests
+      description: Approves or rejects pending participant join requests.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - participants
+                - action
+              properties:
+                sessionId:
+                  type: string
+                participants:
+                  type: array
+                  items:
+                    type: string
+                action:
+                  type: string
+                  enum: [approve, reject]
+      responses:
+        '200':
+          description: Join requests updated.
+
+  /api/v1/groups/{groupJid}/send/text:
+    post:
+      summary: Send Group Text Message
+      description: Queues a text message to a WhatsApp group via the outbox. Supports mentions (or `"all"` for group-wide alerts) and quoted replies.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+          example: "123456789-987654@g.us"
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - message
+              properties:
+                sessionId:
+                  type: string
+                message:
+                  type: string
+                  example: "Team meeting starts in 10 minutes!"
+                mentions:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: string
+                    - type: string
+                      enum: ["all"]
+                  description: Array of phone numbers/JIDs to mention, or "all" to mention entire group
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+                simulateTyping:
+                  type: boolean
+                  default: false
+      responses:
+        '202':
+          description: Group message queued in outbox for resilient delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+        '400':
+          description: Validation failure.
+
+  /api/v1/groups/{groupJid}/send/media:
+    post:
+      summary: Send Group Media via URL
+      description: Queues a media file from a remote public URL to a WhatsApp group.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - mediaType
+                - mediaUrl
+              properties:
+                sessionId:
+                  type: string
+                mediaType:
+                  type: string
+                  enum: [image, video, audio, document]
+                mediaUrl:
+                  type: string
+                  format: uri
+                caption:
+                  type: string
+                viewOnce:
+                  type: boolean
+                mentions:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: string
+                    - type: string
+                      enum: ["all"]
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+                simulateTyping:
+                  type: boolean
+      responses:
+        '202':
+          description: Group media queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/groups/{groupJid}/send/file:
+    post:
+      summary: Send Group Media File
+      description: Uploads and queues a binary media file (image, video, audio, document) up to 25MB to a WhatsApp group.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - file
+              properties:
+                sessionId:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+                caption:
+                  type: string
+                viewOnce:
+                  type: boolean
+                mentions:
+                  type: string
+                  description: JSON array string or "all"
+                quotedMessageId:
+                  type: string
+                simulateTyping:
+                  type: boolean
+      responses:
+        '202':
+          description: Group file queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/groups/{groupJid}/send/voice:
+    post:
+      summary: Send Group Voice Note
+      description: Uploads and queues a voice note to a WhatsApp group.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - file
+              properties:
+                sessionId:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+                viewOnce:
+                  type: boolean
+                quotedMessageId:
+                  type: string
+                simulateTyping:
+                  type: boolean
+      responses:
+        '202':
+          description: Group voice note queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/groups/{groupJid}/send/sticker:
+    post:
+      summary: Send Group Sticker
+      description: Queues a sticker to a WhatsApp group.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+                isAnimated:
+                  type: boolean
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                mediaUrl:
+                  type: string
+                isAnimated:
+                  type: boolean
+                quotedMessageId:
+                  type: string
+      responses:
+        '202':
+          description: Group sticker queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/groups/{groupJid}/send/poll:
+    post:
+      summary: Send Group Poll
+      description: Queues an interactive poll to a WhatsApp group.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - name
+                - values
+              properties:
+                sessionId:
+                  type: string
+                name:
+                  type: string
+                values:
+                  type: array
+                  items:
+                    type: string
+                selectableCount:
+                  type: integer
+                toAnnouncementGroup:
+                  type: boolean
+                mentions:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: string
+                    - type: string
+                      enum: ["all"]
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+      responses:
+        '202':
+          description: Group poll queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/groups/{groupJid}/send/location:
+    post:
+      summary: Send Group Location
+      description: Queues a location pin to a WhatsApp group.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - latitude
+                - longitude
+              properties:
+                sessionId:
+                  type: string
+                latitude:
+                  type: number
+                longitude:
+                  type: number
+                name:
+                  type: string
+                address:
+                  type: string
+                url:
+                  type: string
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+      responses:
+        '202':
+          description: Group location queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/groups/{groupJid}/send/contact:
+    post:
+      summary: Send Group Contact Cards
+      description: Queues contact card(s) to a WhatsApp group.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: groupJid
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                displayName:
+                  type: string
+                contacts:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ContactCardInput'
+                quoted:
+                  $ref: '#/components/schemas/QuotedMessageInput'
+                quotedMessageId:
+                  type: string
+      responses:
+        '202':
+          description: Group contact card(s) queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/channels:
+    post:
+      summary: Create Channel / Newsletter
+      description: Creates a new WhatsApp Channel (Newsletter).
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - name
+              properties:
+                sessionId:
+                  type: string
+                name:
+                  type: string
+                  example: "Product Announcements"
+                description:
+                  type: string
+                  example: "Official announcements channel"
+      responses:
+        '200':
+          description: Channel created.
+
+  /api/v1/channels/{key}:
+    get:
+      summary: Get Channel Metadata
+      description: Retrieves channel information by channel JID (@newsletter) or invite code.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+          description: Channel JID or invite code
+          example: "120363044455566677@newsletter"
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum: [jid, invite]
+            default: jid
+      responses:
+        '200':
+          description: Channel metadata returned.
+
+  /api/v1/channels/{channelJid}:
+    patch:
+      summary: Update Channel Info
+      description: Updates channel name, description, or picture.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                pictureUrl:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: Channel updated.
+    delete:
+      summary: Delete Channel
+      description: Permanently deletes a channel.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: sessionId
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Channel deleted.
+
+  /api/v1/channels/{channelJid}/picture:
+    delete:
+      summary: Remove Channel Picture
+      description: Removes channel icon picture.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: sessionId
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Channel picture removed.
+
+  /api/v1/channels/{channelJid}/follow:
+    post:
+      summary: Follow Channel
+      description: Follows a channel.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: Followed channel.
+
+  /api/v1/channels/{channelJid}/unfollow:
+    post:
+      summary: Unfollow Channel
+      description: Unfollows a channel.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: Unfollowed channel.
+
+  /api/v1/channels/{channelJid}/mute:
+    post:
+      summary: Mute Channel Notifications
+      description: Mutes channel notifications.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: Channel muted.
+
+  /api/v1/channels/{channelJid}/unmute:
+    post:
+      summary: Unmute Channel Notifications
+      description: Unmutes channel notifications.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: Channel unmuted.
+
+  /api/v1/channels/{channelJid}/subscribers:
+    get:
+      summary: Get Channel Subscriber Count & Info
+      description: Retrieves subscriber count for a channel.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Subscriber information returned.
+
+  /api/v1/channels/{channelJid}/messages/{serverId}/react:
+    post:
+      summary: React to Channel Message
+      description: Sends an emoji reaction to a channel message post.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: serverId
+          required: true
+          schema:
+            type: string
+          description: Server ID of message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - emoji
+              properties:
+                sessionId:
+                  type: string
+                emoji:
+                  type: string
+                  example: "🔥"
+      responses:
+        '200':
+          description: Reaction sent.
+
+  /api/v1/channels/{channelJid}/messages:
+    get:
+      summary: Fetch Historical Channel Messages
+      description: Retrieves historical broadcast messages from a channel.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: count
+          schema:
+            type: integer
+            default: 20
+        - in: query
+          name: since
+          schema:
+            type: integer
+        - in: query
+          name: after
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Channel messages retrieved.
+
+  /api/v1/channels/{channelJid}/subscribe-updates:
+    post:
+      summary: Subscribe to Live Channel Updates
+      description: Subscribes to live channel stanzas.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: Subscribed to channel updates.
+
+  /api/v1/channels/{channelJid}/admin-count:
+    get:
+      summary: Get Channel Admin Count
+      description: Retrieves count of channel administrators.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Admin count returned.
+
+  /api/v1/channels/{channelJid}/change-owner:
+    post:
+      summary: Transfer Channel Ownership
+      description: Transfers ownership of channel to another user JID.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - newOwnerJid
+              properties:
+                sessionId:
+                  type: string
+                newOwnerJid:
+                  type: string
+                  example: "2348011223344@s.whatsapp.net"
+      responses:
+        '200':
+          description: Channel ownership transferred.
+
+  /api/v1/channels/{channelJid}/demote:
+    post:
+      summary: Demote Channel Administrator
+      description: Demotes an administrator back to standard follower.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - userJid
+              properties:
+                sessionId:
+                  type: string
+                userJid:
+                  type: string
+                  example: "2348011223344@s.whatsapp.net"
+      responses:
+        '200':
+          description: Admin demoted.
+
+  /api/v1/channels/{channelJid}/send/text:
+    post:
+      summary: Broadcast Text to Channel
+      description: Queues a text message broadcast to a WhatsApp Channel. Enters outbox and completes immediately upon dispatch.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+          example: "120363044455566677@newsletter"
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - message
+              properties:
+                sessionId:
+                  type: string
+                message:
+                  type: string
+                  example: "Version 2.0 has officially been released!"
+      responses:
+        '202':
+          description: Channel message queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/channels/{channelJid}/send/media:
+    post:
+      summary: Broadcast Media to Channel via URL
+      description: Queues a media broadcast to a WhatsApp Channel from a remote URL.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - mediaType
+                - mediaUrl
+              properties:
+                sessionId:
+                  type: string
+                mediaType:
+                  type: string
+                  enum: [image, video, audio, document]
+                mediaUrl:
+                  type: string
+                  format: uri
+                caption:
+                  type: string
+      responses:
+        '202':
+          description: Channel media queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/channels/{channelJid}/send/file:
+    post:
+      summary: Broadcast Media File to Channel
+      description: Uploads and queues a binary media file (up to 25MB) to a WhatsApp Channel.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: channelJid
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - file
+              properties:
+                sessionId:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+                caption:
+                  type: string
+      responses:
+        '202':
+          description: Channel file queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/status/text:
+    post:
+      summary: Post Text Status Story
+      description: Queues a 24-hour disappearing text status story in the outbox (`status@broadcast`).
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - message
+                - statusJidList
+              properties:
+                sessionId:
+                  type: string
+                message:
+                  type: string
+                  example: "Happy New Month everyone!"
+                statusJidList:
+                  type: array
+                  items:
+                    type: string
+                  description: Non-empty list of contact phone numbers/JIDs allowed to see the status
+                  example: ["2348012345678@s.whatsapp.net"]
+                backgroundColor:
+                  type: string
+                  example: "#FF5733"
+                font:
+                  type: integer
+                  description: Baileys font index (1 to 5)
+                  example: 1
+      responses:
+        '202':
+          description: Status queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/status/media:
+    post:
+      summary: Post Media Status Story via URL
+      description: Queues an image or video status story from a remote public URL.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - mediaType
+                - mediaUrl
+                - statusJidList
+              properties:
+                sessionId:
+                  type: string
+                mediaType:
+                  type: string
+                  enum: [image, video]
+                  example: "image"
+                mediaUrl:
+                  type: string
+                  format: uri
+                caption:
+                  type: string
+                statusJidList:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '202':
+          description: Status media queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/status/file:
+    post:
+      summary: Post Media File Status Story
+      description: Uploads and queues an image or video file as a status story.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - file
+                - statusJidList
+              properties:
+                sessionId:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+                caption:
+                  type: string
+                statusJidList:
+                  type: string
+                  description: JSON array string of contact JIDs
+                  example: '["2348012345678@s.whatsapp.net"]'
+      responses:
+        '202':
+          description: Status file queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/status/voice:
+    post:
+      summary: Post Voice Note Status Story
+      description: Uploads and queues an audio recording as a voice status story.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - file
+                - statusJidList
+              properties:
+                sessionId:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+                backgroundColor:
+                  type: string
+                  example: "#2ECC71"
+                statusJidList:
+                  type: string
+                  description: JSON array string of contact JIDs
+      responses:
+        '202':
+          description: Status voice note queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/status/{messageId}:
+    delete:
+      summary: Delete Published Status Story
+      description: Revokes/deletes a status story before its 24-hour expiration. Completes immediately upon socket execution.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: messageId
+          required: true
+          schema:
+            type: string
+          description: WhatsApp message ID of status story
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Status delete queued in outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxEnqueueResponse'
+
+  /api/v1/profile/name:
+    patch:
+      summary: Update Profile Name
+      description: Updates the WhatsApp account display name.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - name
+              properties:
+                sessionId:
+                  type: string
+                name:
+                  type: string
+                  example: "Acme Customer Care"
+      responses:
+        '200':
+          description: Profile name updated.
+
+  /api/v1/profile/status:
+    patch:
+      summary: Update Profile Status / About
+      description: Updates WhatsApp profile about text.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - status
+              properties:
+                sessionId:
+                  type: string
+                status:
+                  type: string
+                  example: "Available for customer inquiries"
+      responses:
+        '200':
+          description: Profile status updated.
+
+  /api/v1/profile/picture:
+    put:
+      summary: Update Profile Picture
+      description: Updates account profile avatar via multipart file or remote image URL.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - imageUrl
+              properties:
+                sessionId:
+                  type: string
+                imageUrl:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: Profile picture updated.
+    delete:
+      summary: Remove Profile Picture
+      description: Removes account profile picture.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: query
+          name: sessionId
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Profile picture removed.
+
+  /api/v1/profile/privacy:
+    get:
+      summary: Get Account Privacy Settings
+      description: Fetches current WhatsApp privacy settings for read receipts, online status, last seen, profile photo, and status visibility.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: force
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Privacy settings retrieved.
+    patch:
+      summary: Update Privacy Setting
+      description: Updates a specific privacy setting.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - setting
+                - value
+              properties:
+                sessionId:
+                  type: string
+                setting:
+                  type: string
+                  enum: [readreceipts, profile, status, online, last, calladd]
+                value:
+                  type: string
+                  enum: [all, none, contact, contact_blacklist]
+      responses:
+        '200':
+          description: Privacy setting updated.
+
+  /api/v1/contacts/{jid}/profile:
+    get:
+      summary: Get Contact Profile
+      description: Fetches profile info and status for a contact JID.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: jid
+          required: true
+          schema:
+            type: string
+          example: "2348012345678@s.whatsapp.net"
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Contact profile returned.
+
+  /api/v1/contacts/blocklist:
+    get:
+      summary: Fetch Blocklist
+      description: Retrieves list of blocked WhatsApp contact JIDs.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blocklist returned.
+
+  /api/v1/contacts/{jid}/block:
+    post:
+      summary: Block Contact
+      description: Blocks a WhatsApp contact.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: jid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: Contact blocked.
+
+  /api/v1/contacts/{jid}/unblock:
+    post:
+      summary: Unblock Contact
+      description: Unblocks a WhatsApp contact.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: jid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: Contact unblocked.

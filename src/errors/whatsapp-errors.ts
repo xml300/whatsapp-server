@@ -30,6 +30,20 @@ export class RecipientNotOnWhatsappError extends WhatsappServiceError {
     }
 }
 
+export class InvalidRecipientError extends WhatsappServiceError {
+    readonly code = "INVALID_RECIPIENT";
+    constructor(sessionId: string, public readonly recipient: string) {
+        super(`Invalid recipient: ${recipient}`, sessionId);
+    }
+}
+
+export class MessageNotFoundError extends WhatsappServiceError {
+    readonly code = "MESSAGE_NOT_FOUND";
+    constructor(sessionId: string, public readonly messageId: string) {
+        super(`Message ${messageId} not found`, sessionId);
+    }
+}
+
 export class InvalidMessageKeyError extends WhatsappServiceError {
     readonly code = "INVALID_MESSAGE_KEY";
     constructor(sessionId: string){

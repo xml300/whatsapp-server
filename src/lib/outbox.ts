@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { unlink } from "fs/promises";
-import { generateMessageIDV2 } from "baileys";
+import { generateMessageIDV2, BufferJSON } from "baileys";
 import { Outbox, Session } from "../data/db.js";
 import { Events } from "../data/models/events.js";
 import { nameLogger } from "./logger.js";
@@ -13,9 +13,11 @@ import {
     SessionNotFoundError,
     SsrfBlockedUrlError,
     UnsupportedMediaTypeError,
+    MessageNotFoundError,
+    InvalidRecipientError,
     WhatsappServiceError
 } from "../errors/whatsapp-errors.js";
-import { ConnectionStatus } from "../types/whatsapp.js";
+import { ConnectionStatus, type SendMessageExtraOptions } from "../types/whatsapp.js";
 import type { IOutbox, OutboxActionType, OutboxStatus } from "../types/models.js";
 
 const logger = nameLogger("OutboxEngine");
@@ -271,13 +273,42 @@ export class OutboxEngine {
         // 2. Token-bucket rate limiter
         await this.rateLimiter.acquireToken(job.sessionId);
 
-        // 3. Anti-ban pacing
-        const isTypingAction = ["text", "media_url", "media_file", "voice"].includes(job.actionType);
-        if (job.simulateTyping && isTypingAction && job.payload.phoneNumber) {
+        // 3. Resolve target recipient
+        const targetRecipient = job.payload.phoneNumber || job.payload.recipientJid || job.recipientJid;
+
+        // 4. Build extra options
+        const extra: SendMessageExtraOptions = {
+            customMessageId: job.waMessageId,
+            ...(job.payload.mentions ? { mentions: job.payload.mentions } : {}),
+            ...(job.payload.quoted ? { quoted: job.payload.quoted } : {}),
+            ...(job.payload.viewOnce !== undefined ? { viewOnce: job.payload.viewOnce } : {}),
+            ...(job.payload.isAnimated !== undefined ? { isAnimated: job.payload.isAnimated } : {}),
+            ...(job.payload.statusOptions ? { statusOptions: job.payload.statusOptions } : {})
+        };
+
+        // 5. Anti-ban pacing
+        const isTypingAction = [
+            "text",
+            "media_url",
+            "media_file",
+            "voice",
+            "status_text",
+            "status_media_url",
+            "status_media_file",
+            "status_voice"
+        ].includes(job.actionType);
+
+        if (
+            job.simulateTyping &&
+            isTypingAction &&
+            targetRecipient &&
+            targetRecipient !== "status@broadcast" &&
+            !targetRecipient.endsWith("@newsletter")
+        ) {
             try {
-                await whatsappService.sendTyping(job.sessionId, job.payload.phoneNumber);
+                await whatsappService.sendTyping(job.sessionId, targetRecipient);
                 await new Promise((r) => setTimeout(r, 1000 + Math.floor(Math.random() * 1000)));
-                await whatsappService.sendTypingPaused(job.sessionId, job.payload.phoneNumber);
+                await whatsappService.sendTypingPaused(job.sessionId, targetRecipient);
             } catch {
                 // Ignore transient typing error
             }
@@ -286,77 +317,181 @@ export class OutboxEngine {
             await new Promise((r) => setTimeout(r, jitterMs));
         }
 
-        // 4. Action execution
+        // 6. Action execution
         try {
+            let sentMessage: any = null;
             switch (job.actionType) {
                 case "text":
-                    await whatsappService.sendMessage(
+                case "status_text":
+                    sentMessage = await whatsappService.sendMessage(
                         job.sessionId,
-                        job.payload.phoneNumber!,
+                        targetRecipient,
                         job.payload.message!,
-                        job.waMessageId
+                        job.waMessageId,
+                        extra
                     );
                     break;
                 case "media_url":
-                    await whatsappService.sendMediaMessage(
+                case "status_media_url":
+                    sentMessage = await whatsappService.sendMediaMessage(
                         job.sessionId,
-                        job.payload.phoneNumber!,
+                        targetRecipient,
                         job.payload.mediaType!,
                         job.payload.mediaUrl!,
                         job.payload.caption,
-                        job.waMessageId
+                        job.waMessageId,
+                        extra
                     );
                     break;
                 case "media_file":
-                    await whatsappService.sendMediaFile(
+                case "status_media_file":
+                    sentMessage = await whatsappService.sendMediaFile(
                         job.sessionId,
-                        job.payload.phoneNumber!,
+                        targetRecipient,
                         {
                             path: job.payload.filePath!,
                             mimetype: job.payload.mimeType || "application/octet-stream",
                             originalname: job.payload.originalName || "file"
                         },
                         job.payload.caption,
-                        job.waMessageId
+                        job.waMessageId,
+                        extra
                     );
                     break;
                 case "voice":
-                    await whatsappService.sendVoiceNote(
+                case "status_voice":
+                    sentMessage = await whatsappService.sendVoiceNote(
                         job.sessionId,
-                        job.payload.phoneNumber!,
+                        targetRecipient,
                         {
                             path: job.payload.filePath!,
                             mimetype: job.payload.mimeType || "audio/ogg",
                             originalname: job.payload.originalName || "voice.ogg"
                         },
-                        job.waMessageId
+                        job.waMessageId,
+                        extra
+                    );
+                    break;
+                case "sticker":
+                    sentMessage = await whatsappService.sendSticker(
+                        job.sessionId,
+                        targetRecipient,
+                        {
+                            ...(job.payload.mediaUrl ? { url: job.payload.mediaUrl } : {}),
+                            ...(job.payload.filePath ? { path: job.payload.filePath } : {}),
+                            ...(job.payload.mimeType ? { mimetype: job.payload.mimeType } : {}),
+                            ...(job.payload.isAnimated !== undefined ? { isAnimated: job.payload.isAnimated } : {})
+                        },
+                        job.waMessageId,
+                        extra
+                    );
+                    break;
+                case "poll":
+                    sentMessage = await whatsappService.sendPoll(
+                        job.sessionId,
+                        targetRecipient,
+                        job.payload.poll!,
+                        job.waMessageId,
+                        extra
+                    );
+                    break;
+                case "location":
+                    sentMessage = await whatsappService.sendLocation(
+                        job.sessionId,
+                        targetRecipient,
+                        job.payload.location!,
+                        job.waMessageId,
+                        extra
+                    );
+                    break;
+                case "contact":
+                    sentMessage = await whatsappService.sendContacts(
+                        job.sessionId,
+                        targetRecipient,
+                        job.payload.contacts!,
+                        job.waMessageId,
+                        extra
                     );
                     break;
                 case "react":
-                    await whatsappService.reactMessage(
+                    sentMessage = await whatsappService.reactMessage(
                         job.sessionId,
                         job.payload.messageKey as any,
                         job.payload.emoji!,
                         job.waMessageId
                     );
                     break;
+                case "edit":
+                    sentMessage = await whatsappService.editMessage(
+                        job.sessionId,
+                        job.payload.messageKey as any,
+                        job.payload.message!,
+                        job.waMessageId
+                    );
+                    break;
                 case "delete":
-                    await whatsappService.deleteMessage(
+                case "status_delete":
+                    sentMessage = await whatsappService.deleteMessage(
                         job.sessionId,
                         job.payload.messageKey as any,
                         job.waMessageId
                     );
                     break;
                 case "read":
-                    await whatsappService.readMessage(
+                    sentMessage = await whatsappService.readMessage(
                         job.sessionId,
                         job.payload.messageKey as any
                     );
                     break;
+                case "pin":
+                    sentMessage = await whatsappService.pinMessage(
+                        job.sessionId,
+                        job.payload.messageKey as any,
+                        job.payload.pin!.type,
+                        job.payload.pin?.time,
+                        job.waMessageId
+                    );
+                    break;
+                case "star":
+                    sentMessage = await whatsappService.starMessage(
+                        job.sessionId,
+                        job.payload.messageKey as any,
+                        Boolean(job.payload.star?.star)
+                    );
+                    break;
+                case "forward":
+                    sentMessage = await whatsappService.forwardMessage(
+                        job.sessionId,
+                        targetRecipient,
+                        job.payload.forward as any,
+                        job.waMessageId
+                    );
+                    break;
+                default:
+                    throw new Error(`Unsupported outbox actionType: ${job.actionType}`);
             }
 
-            // 5. Two-Stage Completion
-            if (job.actionType === "read") {
+            // Store returned sentMessage preserving Buffers
+            if (sentMessage && typeof sentMessage === "object") {
+                try {
+                    const serializedSentMsg = JSON.parse(JSON.stringify(sentMessage, BufferJSON.replacer));
+                    await Outbox.updateOne(
+                        { _id: String(job._id) },
+                        { $set: { "payload.sentMessage": serializedSentMsg, updatedAt: new Date() } }
+                    );
+                } catch (e) {
+                    logger.warn(`Failed to serialize sentMessage for job ${job._id}: ${e}`);
+                }
+            }
+
+            // 7. Two-Stage Completion
+            const immediateAck =
+                job.actionType === "read" ||
+                job.actionType === "star" ||
+                job.actionType === "status_delete" ||
+                job.recipientJid.endsWith("@newsletter");
+
+            if (immediateAck) {
                 await Outbox.updateOne(
                     { _id: String(job._id) },
                     {
@@ -367,6 +502,9 @@ export class OutboxEngine {
                         }
                     }
                 );
+                if (job.payload.filePath) {
+                    unlink(job.payload.filePath).catch(() => {});
+                }
                 await Events.create({
                     userId: job.userId,
                     sessionId: job.sessionId,
@@ -444,6 +582,8 @@ export class OutboxEngine {
             err instanceof UnsupportedMediaTypeError ||
             err instanceof InvalidMessageKeyError ||
             err instanceof RecipientNotOnWhatsappError ||
+            err instanceof MessageNotFoundError ||
+            err instanceof InvalidRecipientError ||
             err?.code === "ENOENT" ||
             job.attempts >= job.maxAttempts;
 

@@ -1,7 +1,6 @@
-FROM node:alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
-ENV npm_config_platform=linuxmusl
-RUN apk add --no-cache curl && \
+RUN apk add --no-cache curl python3 make g++ && \
     curl -sf https://gobinaries.com/tj/node-prune | sh -s -- -b /usr/local/bin
 COPY package*.json ./
 RUN npm ci
@@ -15,9 +14,8 @@ RUN npm ci --omit=dev && npm cache clean --force && \
 RUN /usr/local/bin/node-prune ./node_modules
 
 
-FROM alpine:3.21
-RUN apk add --no-cache nodejs \
-    && addgroup -S appgroup \
+FROM node:22-alpine
+RUN addgroup -S appgroup \
     && adduser -S appuser -G appgroup
 
 WORKDIR /app

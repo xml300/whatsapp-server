@@ -1,4 +1,18 @@
 import { makeWASocket, type WAMessage } from "baileys";
+import type { QuotedMessageRef } from "./models.js";
+
+export interface SendMessageExtraOptions {
+    customMessageId?: string;
+    mentions?: string[] | "all";
+    quoted?: QuotedMessageRef;
+    viewOnce?: boolean;
+    isAnimated?: boolean;
+    statusOptions?: {
+        statusJidList?: string[];
+        backgroundColor?: string;
+        font?: number;
+    };
+}
 
 export type WhatsappEvents = {
     connected: (apiKey: string) => void;

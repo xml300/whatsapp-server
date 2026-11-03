@@ -55,8 +55,8 @@ erDiagram
         string sessionId FK
         string idempotencyKey "Client Key or UUID v4"
         string waMessageId UK "Baileys Message ID"
-        string recipientJid "E.164@s.whatsapp.net"
-        string actionType "text | media_url | media_file | voice | react | delete | read"
+        string recipientJid "E.164@s.whatsapp.net | group@g.us | channel@newsletter | status@broadcast"
+        string actionType "text | media_url | media_file | voice | sticker | poll | location | contact | react | edit | delete | read | pin | star | forward | status_text | status_media_url | status_media_file | status_voice | status_delete"
         mixed payload "Action payload & parameters"
         boolean simulateTyping "Presence emulation flag"
         string status "QUEUED | PROCESSING | DISPATCHED | DELIVERED_TO_SERVER | FAILED_TERMINAL | CANCELLED"
@@ -74,7 +74,7 @@ erDiagram
         ObjectId _id PK
         string userId FK
         string sessionId FK
-        string eventType "message | message.update | message.sent | message.delivered | message.failed | connection | qr"
+        string eventType "connection | qr | message | message.update | message.edited | message.delete | message.reaction | poll.vote | message.sent | message.delivered | message.failed | group.upsert | group.update | group.participants | group.join_request | channel.reaction | channel.view | channel.participants | channel.settings | presence.update | call"
         mixed payload "Structured event payload"
         date createdAt "TTL index: 3 days"
     }
@@ -134,9 +134,12 @@ Stores API keys allocated to users for programmatic endpoint access.
   |---|---|---|---|---|
   | `_id` | `ObjectId` | Auto | Yes (PK) | Auto-generated MongoDB ObjectId. |
   | `userId` | `String` | Yes | No | Reference to `User._id`. |
-  | `apiKey` | `String` | Yes | No | UUID v4 token. |
+  | `apiKey` | `String` | Yes | Yes | UUID v4 token. |
   | `createdAt` | `Date` | Auto | No | Creation timestamp. |
   | `updatedAt` | `Date` | Auto | No | Update timestamp. |
+- **Indexes**:
+  - `{ apiKey: 1 }` (unique index for $\mathcal{O}(\log M)$ authentication lookups, paired with a 60s in-memory TTL cache in `src/data/models/api-keys.ts`)
+  - `{ userId: 1 }` (index for user-scoped API key queries)
 
 ---
 
@@ -179,9 +182,9 @@ Represents transactional outbound messages and actions queued for delivery via t
   | `sessionId` | `String` | Yes | — | Reference to `Session.id`. |
   | `idempotencyKey` | `String` | Yes | — | Client-supplied key or auto-generated UUID v4 preventing duplicate dispatches. |
   | `waMessageId` | `String` | Yes | — | Deterministic Baileys message ID (`generateMessageIDV2()`). Reused during retransmissions. |
-  | `recipientJid` | `String` | Yes | — | Normalized destination JID (e.g. `2348012345678@s.whatsapp.net`). |
-  | `actionType` | `String` | Yes | — | Operation type: `"text"`, `"media_url"`, `"media_file"`, `"voice"`, `"react"`, `"delete"`, or `"read"`. |
-  | `payload` | `Mixed` | Yes | — | Action-specific payload (message text, media URL, staged file path, mimeType, emoji, messageKey). |
+  | `recipientJid` | `String` | Yes | — | Normalized destination JID (`<phone>@s.whatsapp.net`, `<group>@g.us`, `<channel>@newsletter`, or `status@broadcast`). |
+  | `actionType` | `String` | Yes | — | Operation type (all 20 actions): `"text"`, `"media_url"`, `"media_file"`, `"voice"`, `"sticker"`, `"poll"`, `"location"`, `"contact"`, `"react"`, `"edit"`, `"delete"`, `"read"`, `"pin"`, `"star"`, `"forward"`, `"status_text"`, `"status_media_url"`, `"status_media_file"`, `"status_voice"`, or `"status_delete"`. |
+  | `payload` | `Mixed` | Yes | — | Action-specific parameters: text messages, media URLs, staged file paths, MIME types, rich cards (`poll`, `location`, `contacts`), quotes (`quoted`), user mentions (`mentions`), mutations (`messageKey`, `emoji`, `pin`, `star`, `forward`), status options (`statusOptions`), and serialized sent message object (`sentMessage`). |
   | `simulateTyping` | `Boolean` | No | `false` | When true, emits typing presence before message dispatch. |
   | `status` | `String` | Yes | `"QUEUED"` | Lifecycle state: `"QUEUED"`, `"PROCESSING"`, `"DISPATCHED"`, `"DELIVERED_TO_SERVER"`, `"FAILED_TERMINAL"`, `"CANCELLED"`. |
   | `attempts` | `Number` | Yes | `0` | Number of dispatch attempts executed. |
@@ -194,7 +197,10 @@ Represents transactional outbound messages and actions queued for delivery via t
   | `updatedAt` | `Date` | Auto | `Date.now` | Last update timestamp. |
 - **Indexes**:
   - `{ sessionId: 1, idempotencyKey: 1 }` (unique compound index enforcing strict per-session idempotency)
-  - `{ sessionId: 1, status: 1, nextAttemptAt: 1, _id: 1 }` (compound index for fast polling and mailbox drain by `ChatActor`)
+  - `{ sessionId: 1, recipientJid: 1, status: 1, nextAttemptAt: 1, _id: 1 }` (compound index for direct per-JID mailbox claim by `ChatActor`)
+  - `{ sessionId: 1, status: 1, nextAttemptAt: 1, _id: 1 }` (compound index for session-wide queued job discovery on reconnect)
+  - `{ status: 1, dispatchedAt: 1 }` (compound index for background sweeper `SERVER_ACK` timeout recovery)
+  - `{ status: 1, nextAttemptAt: 1 }` (compound index for background sweeper queued job discovery)
   - `{ sessionId: 1, waMessageId: 1 }` (index for rapid two-stage `SERVER_ACK` lookups)
   - `{ userId: 1, _id: 1 }` (index for user-scoped outbox queries)
   - `{ createdAt: 1 }` (TTL index with `expireAfterSeconds: 259200` — 3 days automatic document expiration)
@@ -209,12 +215,13 @@ Stores time-series events emitted by the WhatsApp Multi-Device connection and ou
   |---|---|---|---|---|
   | `userId` | `String` | Yes | — | Reference to `User._id`. |
   | `sessionId` | `String` | Yes | — | Reference to `Session.id`. |
-  | `eventType` | `String` | Yes | — | Event classification (`"message"`, `"message.update"`, `"message.sent"`, `"message.delivered"`, `"message.failed"`, `"connection"`, `"qr"`). |
+  | `eventType` | `String` | Yes | — | Event classification: Core/Outbox (`"connection"`, `"qr"`, `"message"`, `"message.update"`, `"message.edited"`, `"message.delete"`, `"message.reaction"`, `"poll.vote"`, `"message.sent"`, `"message.delivered"`, `"message.failed"`), Groups (`"group.upsert"`, `"group.update"`, `"group.participants"`, `"group.join_request"`), Channels (`"channel.reaction"`, `"channel.view"`, `"channel.participants"`, `"channel.settings"`), and Presence/Calls (`"presence.update"`, `"call"`). |
   | `payload` | `Mixed` | Yes | — | JSON event payload. |
   | `createdAt` | `Date` | Auto | `Date.now` | Event timestamp (governed by 3-day TTL index). |
 - **Indexes**:
   - `{ userId: 1, _id: 1 }` (user-scoped cursor pagination)
   - `{ userId: 1, sessionId: 1, _id: 1 }` (session-scoped cursor pagination)
+  - `{ userId: 1, sessionId: 1, "payload.key.id": 1 }` (rapid $\mathcal{O}(\log N)$ historical message lookup by WhatsApp message ID for `getMessage` socket hook, poll vote decryption, quotes, and forwarding)
   - `{ createdAt: 1 }` (TTL index with `expireAfterSeconds: 259200` — 3 days automatic expiration)
 
 ---
@@ -345,17 +352,26 @@ Controls the outbound throughput per WhatsApp session to prevent network bans:
   - Value: Serialized promise chain ensuring asynchronous callers queue up cleanly and evaluate rate limit quotas sequentially without race conditions.
 
 ### 4.3 Disk Staging Subsystem (`data/outbox-media/`)
-Multipart file uploads for media messages (`/send/file`, `/send/voice`) are staged directly to the filesystem:
+Multipart file uploads for media messages (`/send/file`, `/send/voice`, `/send/sticker`, `/groups/:groupJid/send/file`, `/groups/:groupJid/send/voice`, `/groups/:groupJid/send/sticker`, `/channels/:channelJid/send/file`, `/status/file`, `/status/voice`) and picture updates are staged directly to the filesystem:
 - **Directory**: `data/outbox-media/` (created automatically on startup).
 - **Filename Formatting**: `${randomUUID()}${ext}` using Node's cryptographic `randomUUID()`.
 - **Upload Limit**: Enforces a strict 25MB ceiling (`limits: { fileSize: 25 * 1024 * 1024 }`).
 - **Automatic Lifecycle Cleanup**:
   - **Validation Errors**: If declarative validation fails in `validate.ts`, `unlink(req.file.path)` is invoked immediately before sending HTTP 400.
-  - **Delivery Confirmation**: When `handleAck()` marks an outbox record as `DELIVERED_TO_SERVER`, the staged file is unlinked.
-  - **Terminal Failures**: When a job transitions to `FAILED_TERMINAL` (e.g. invalid recipient, max attempts exceeded, or session disconnect), the file is unlinked.
+  - **Delivery Confirmation**: When `handleAck()` marks an outbox record as `DELIVERED_TO_SERVER` (or immediately upon dispatch for actions with immediate completion), the staged file is unlinked.
+  - **Terminal Failures**: When a job transitions to `FAILED_TERMINAL` (e.g. invalid recipient, message not found, max attempts exceeded, or session disconnect), the file is unlinked.
   - **Duplicate Idempotency**: If a client re-submits a request with an identical `Idempotency-Key` and a new file, the old staged file is immediately unlinked.
 
-### 4.4 `WhatsappManager` Singleton (`src/lib/whatsapp-manager.ts`)
+### 4.4 In-Memory Group Metadata Cache (`groupCache` in `WhatsappService`)
+To eliminate redundant WhatsApp network queries when performing group messaging, validating permissions, or expanding group-wide mentions (`@all`), each `WhatsappService` instance maintains an in-memory group metadata cache:
+- **Structure**: `groupCache: Map<string, { data: GroupMetadata; expiresAt: number }>`
+- **TTL**: 5 minutes (300,000ms).
+- **Socket Hook**: Registered with Baileys socket options as `cachedGroupMetadata: async (jid) => { const entry = this.groupCache.get(jid); return (entry && entry.expiresAt > Date.now()) ? entry.data : undefined; }`.
+- **Event-Driven Cache Coherence**:
+  - Populated or updated whenever `groupMetadata()` is called or when Baileys receives a `groups.upsert` event.
+  - Automatically invalidated (`groupCache.delete(jid)`) when receiving `groups.update` or `group-participants.update` socket events, ensuring stale participant lists or subject/setting updates are never retained past external changes.
+
+### 4.5 `WhatsappManager` Singleton (`src/lib/whatsapp-manager.ts`)
 - **`sockets: Map<string, WhatsappService>`**:
   - Key: `sessionId`.
   - Value: Active `WhatsappService` instance encapsulating the Baileys WebSocket and session state.
@@ -363,10 +379,10 @@ Multipart file uploads for media messages (`/send/file`, `/send/voice`) are stag
   - Key: `sessionId`.
   - Value: In-flight connection promise acting as a concurrency mutex to prevent duplicate socket connections for the same session.
 
-### 4.5 `Logger` Queue (`src/lib/logger.ts`)
+### 4.6 `Logger` Queue (`src/lib/logger.ts`)
 - **`logBuffer: LogRecord[]`**:
   - Array collecting structured log events in memory.
   - Flushed in bulk to the `Log` MongoDB collection when reaching **50 records** or upon process termination signals (`handleShutdown`).
 
-### 4.6 Legacy Disk Cache Snapshot (`data/sessions.json`)
+### 4.7 Legacy Disk Cache Snapshot (`data/sessions.json`)
 - Retained for backward compatibility. If present during server cold start, `handleStartup()` reads active session IDs, migrates them to MongoDB `Session.desiredState = "CONNECTED"`, and unlinks the file.

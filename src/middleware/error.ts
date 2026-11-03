@@ -11,6 +11,8 @@ const ERROR_STATUS_MAP: Record<string, number> = {
     UNSUPPORTED_MEDIA_TYPE: 415,
     BLOCKED_URL: 403,
     TRANSPORT_ERROR: 502,
+    MESSAGE_NOT_FOUND: 404,
+    INVALID_RECIPIENT: 400,
 };
 
 export default function errorMiddleware(err: any, req: Request, res: Response, next: NextFunction) {

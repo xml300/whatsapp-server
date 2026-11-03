@@ -45,11 +45,13 @@ export const useNoSQLAuthState = async (
 	}
 
 	const readKeys = async (type: string, ids: string[]) => {
-		const keys = await KeyStore.find({phoneNumber: phoneNumber, type: type, id: {$in: ids}});
+		if (ids.length === 0) return [];
+		const compositeKeys = ids.map(id => `${type}-${id}`);
+		const keys = await KeyStore.find({ phoneNumber: phoneNumber, key: { $in: compositeKeys } }).lean();
 		return keys.map(key => {
 			const value = JSON.parse(key.value || "null", BufferJSON.reviver);
 			return {
-				id: key.id,
+				id: key.id as string,
 				value: type === 'app-state-sync-key' ? proto.Message.AppStateSyncKeyData.fromObject(value) : value
 			}
 		});

@@ -8,7 +8,7 @@ import { loggingMiddleware } from "./middleware/logging.js";
 import { logger } from "./lib/logger.js"; 
 import errorMiddleware from "./middleware/error.js";
 import cookieParser from "cookie-parser";
-import { platformOriginGuard } from "./middleware/origin-guard.js";
+import { platformOriginGuard, getAllowedOrigins, normalizeOrigin } from "./middleware/origin-guard.js";
 import { handleShutdown, handleStartup } from "./utils/server.js"; 
 
 const app = express();
@@ -19,31 +19,26 @@ app.set("trust proxy", 1);
 
 app.use(loggingMiddleware);
 
-// Multi-origin parsing for CORS_ORIGIN (e.g. "https://bot-frontends.vercel.app,http://localhost:5173")
-const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:3000")
-    .split(",")
-    .map((o) => o.trim().replace(/\/+$/, ""))
-    .filter(Boolean);
-
 // 1. Strict CORS for Platform APIs (supports cookie credentials)
 const platformCors = cors({
     origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-        const normalized = origin.replace(/\/+$/, "");
+        const allowedOrigins = getAllowedOrigins();
+        const normalized = normalizeOrigin(origin);
         if (allowedOrigins.includes("*") || allowedOrigins.includes(normalized)) {
             return callback(null, true);
         }
         return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'x-api-key', 'Idempotency-Key', 'idempotency-key'],
     credentials: true
 });
 
 // 2. Open CORS for Gateway v1 APIs (authenticated via x-api-key header)
 const gatewayCors = cors({
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-api-key', 'Idempotency-Key', 'idempotency-key'],
     credentials: false
 });
@@ -52,11 +47,11 @@ app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
-// Platform routes guarded by strict CORS + origin guard
-app.use('/api', platformCors, platformOriginGuard, platformRoutes);
-
-// Gateway v1 routes open to any origin (secured by x-api-key)
+// Gateway v1 routes open to any origin (secured by x-api-key) — mounted before /api so /api middleware doesn't intercept /api/v1
 app.use('/api/v1', gatewayCors, v1Routes);
+
+// Platform routes guarded by strict CORS + origin guard (cookie auth)
+app.use('/api', platformCors, platformOriginGuard, platformRoutes);
 
 app.use((req, res) => {
     res.status(404).json({
