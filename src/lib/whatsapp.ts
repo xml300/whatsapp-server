@@ -79,6 +79,7 @@ export class WhatsappService {
     private retries: number;
     private timeout?: NodeJS.Timeout;
     private groupCache: Map<string, { data: GroupMetadata; expiresAt: number }>;
+    private allGroupsCacheExpiresAt: number;
 
     constructor(phoneNumber: string, sessionId: string = "", userId: string = "") {
         this.emitter = new EventEmitter();
@@ -92,6 +93,7 @@ export class WhatsappService {
         this.qr = null;
         this.retries = 0;
         this.groupCache = new Map();
+        this.allGroupsCacheExpiresAt = 0;
     }
 
     private async resolveWAMessageById(messageId: string): Promise<any> {
@@ -390,6 +392,7 @@ export class WhatsappService {
                     });
                 }
             }
+            this.allGroupsCacheExpiresAt = Date.now() + 5 * 60 * 1000;
             if (this.userId && this.sessionId) {
                 try {
                     await Events.create({
@@ -405,9 +408,15 @@ export class WhatsappService {
         });
 
         this.socket?.ev.on('groups.update', async (updates) => {
-            for (const group of updates) {
-                if (group.id) {
-                    this.groupCache.delete(group.id);
+            for (const update of updates) {
+                if (update.id) {
+                    const cached = this.groupCache.get(update.id);
+                    if (cached) {
+                        this.groupCache.set(update.id, {
+                            data: { ...cached.data, ...update } as GroupMetadata,
+                            expiresAt: Date.now() + 5 * 60 * 1000
+                        });
+                    }
                 }
             }
             if (this.userId && this.sessionId) {
@@ -733,6 +742,7 @@ export class WhatsappService {
         }
         this.cleanupEventListeners();
         this.groupCache.clear();
+        this.allGroupsCacheExpiresAt = 0;
         socket.end(undefined);
         this.socket = null;
         this.status = ConnectionStatus.DISCONNECTED;
@@ -750,6 +760,7 @@ export class WhatsappService {
             this.socket.end(undefined);
         }
         this.groupCache.clear();
+        this.allGroupsCacheExpiresAt = 0;
     }
 
     private async recordOutgoingMessage(message: any) {
@@ -1267,9 +1278,58 @@ export class WhatsappService {
 
     // --- Group Management Methods ---
 
-    async groupFetchAllParticipating() {
+    async groupFetchAllParticipating(forceRefresh: boolean = false): Promise<{ [jid: string]: GroupMetadata }> {
         const socket = await this.ensureSendable();
-        return await socket.groupFetchAllParticipating();
+        const now = Date.now();
+
+        // 1. If not forcing refresh and all groups cache is valid, return cached groups
+        if (!forceRefresh && this.allGroupsCacheExpiresAt > now && this.groupCache.size > 0) {
+            const cachedRecord: Record<string, GroupMetadata> = {};
+            for (const [id, entry] of this.groupCache.entries()) {
+                if (entry.expiresAt > now) {
+                    cachedRecord[id] = entry.data;
+                }
+            }
+            if (Object.keys(cachedRecord).length > 0) {
+                return cachedRecord;
+            }
+        }
+
+        // 2. Fetch from network
+        try {
+            const fetched = await socket.groupFetchAllParticipating();
+            const record: Record<string, GroupMetadata> = fetched || {};
+
+            for (const [id, meta] of Object.entries(record)) {
+                this.groupCache.set(id, {
+                    data: meta,
+                    expiresAt: now + 5 * 60 * 1000
+                });
+            }
+
+            // Merge unexpired groups from cache in case of partial response
+            for (const [id, entry] of this.groupCache.entries()) {
+                if (!record[id] && entry.expiresAt > now) {
+                    record[id] = entry.data;
+                }
+            }
+
+            this.allGroupsCacheExpiresAt = now + 5 * 60 * 1000;
+            return record;
+        } catch (err) {
+            logger.warn(`Failed to fetch all participating groups from network: ${err}`);
+            // Graceful fallback to cache if available
+            if (this.groupCache.size > 0) {
+                const fallbackRecord: Record<string, GroupMetadata> = {};
+                for (const [id, entry] of this.groupCache.entries()) {
+                    fallbackRecord[id] = entry.data;
+                }
+                if (Object.keys(fallbackRecord).length > 0) {
+                    return fallbackRecord;
+                }
+            }
+            throw err;
+        }
     }
 
     async groupMetadata(groupJid: string) {
@@ -1286,7 +1346,14 @@ export class WhatsappService {
     async groupCreate(subject: string, participants: string[]) {
         const socket = await this.ensureSendable();
         const normalized = participants.map((p) => normalizeParticipantJid(p) || formatJid(p));
-        return await socket.groupCreate(subject, normalized);
+        const res = await socket.groupCreate(subject, normalized);
+        if (res?.id) {
+            this.groupCache.set(res.id, {
+                data: res,
+                expiresAt: Date.now() + 5 * 60 * 1000
+            });
+        }
+        return res;
     }
 
     async groupLeave(groupJid: string) {
@@ -1297,14 +1364,32 @@ export class WhatsappService {
 
     async groupUpdateSubject(groupJid: string, subject: string) {
         const socket = await this.ensureSendable();
-        this.groupCache.delete(groupJid);
-        return await socket.groupUpdateSubject(groupJid, subject);
+        const res = await socket.groupUpdateSubject(groupJid, subject);
+        const cached = this.groupCache.get(groupJid);
+        if (cached) {
+            this.groupCache.set(groupJid, {
+                data: { ...cached.data, subject },
+                expiresAt: Date.now() + 5 * 60 * 1000
+            });
+        } else {
+            this.groupCache.delete(groupJid);
+        }
+        return res;
     }
 
     async groupUpdateDescription(groupJid: string, description: string) {
         const socket = await this.ensureSendable();
-        this.groupCache.delete(groupJid);
-        return await socket.groupUpdateDescription(groupJid, description);
+        const res = await socket.groupUpdateDescription(groupJid, description);
+        const cached = this.groupCache.get(groupJid);
+        if (cached) {
+            this.groupCache.set(groupJid, {
+                data: { ...cached.data, desc: description },
+                expiresAt: Date.now() + 5 * 60 * 1000
+            });
+        } else {
+            this.groupCache.delete(groupJid);
+        }
+        return res;
     }
 
     async groupSettingUpdate(groupJid: string, setting: 'announcement' | 'not_announcement' | 'locked' | 'unlocked') {

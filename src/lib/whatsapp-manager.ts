@@ -376,10 +376,10 @@ class WhatsappManager {
 
     // --- Group Management Methods ---
 
-    async groupFetchAllParticipating(sessionId: string) {
+    async groupFetchAllParticipating(sessionId: string, forceRefresh?: boolean) {
         const clientSession = this.sockets.get(sessionId);
         if (!clientSession) throw new SessionNotFoundError(sessionId);
-        return await clientSession.groupFetchAllParticipating();
+        return await clientSession.groupFetchAllParticipating(forceRefresh);
     }
 
     async groupMetadata(sessionId: string, groupJid: string) {

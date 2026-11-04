@@ -70,10 +70,12 @@ router.use(authMiddleware);
 
 router.get('/', validate({
     query: {
-        sessionId: "required|string"
+        sessionId: "required|string",
+        forceRefresh: "boolean"
     }
 }), async (req, res) => {
     const sessionId = req.query.sessionId as string;
+    const forceRefresh = String(req.query.forceRefresh) === "true";
     const userId = res.locals.userId;
 
     const session = await Session.findOne({ id: sessionId, userId });
@@ -84,10 +86,14 @@ router.get('/', validate({
         });
     }
 
-    const groups = await (whatsappService as any).groupFetchAllParticipating(sessionId);
+    const groupsMap = await (whatsappService as any).groupFetchAllParticipating(sessionId, forceRefresh);
+    const groupsList = Object.values(groupsMap || {});
     return res.json({
         success: true,
-        data: groups
+        data: {
+            total: groupsList.length,
+            groups: groupsList
+        }
     });
 });
 
