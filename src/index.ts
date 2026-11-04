@@ -4,6 +4,7 @@ import express from "express";
 import cors from "cors"; 
 import platformRoutes from "./routes/platform/_indexRoutes.js";
 import v1Routes from "./routes/v1/_indexRoutes.js";
+import oauthRoutes, { handleOAuthMetadata } from "./routes/oauthRoutes.js";
 import { loggingMiddleware } from "./middleware/logging.js";
 import { logger } from "./lib/logger.js"; 
 import errorMiddleware from "./middleware/error.js";
@@ -44,10 +45,14 @@ const gatewayCors = cors({
 });
 
 app.use(cookieParser());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Gateway v1 routes open to any origin (secured by x-api-key) — mounted before /api so /api middleware doesn't intercept /api/v1
+// OAuth 2.0 Discovery & Token Endpoints (open to external callers, MCP clients, curl)
+app.get('/.well-known/oauth-authorization-server', gatewayCors, handleOAuthMetadata);
+app.use('/oauth', gatewayCors, oauthRoutes);
+
+// Gateway v1 routes open to any origin (secured by Bearer token or x-api-key) — mounted before /api so /api middleware doesn't intercept /api/v1
 app.use('/api/v1', gatewayCors, v1Routes);
 
 // Platform routes guarded by strict CORS + origin guard (cookie auth)
