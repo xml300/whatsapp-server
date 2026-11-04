@@ -35,11 +35,11 @@ const platformCors = cors({
     credentials: true
 });
 
-// 2. Open CORS for Gateway v1 APIs (authenticated via x-api-key header)
+// 2. Open CORS for Gateway v1 APIs (authenticated via Bearer token or x-api-key header)
 const gatewayCors = cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'x-api-key', 'Idempotency-Key', 'idempotency-key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'authorization', 'x-api-key', 'X-Api-Key', 'Idempotency-Key', 'idempotency-key'],
     credentials: false
 });
 

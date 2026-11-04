@@ -56,6 +56,9 @@ router.post('/login', validate({
     return res.cookie('auth_token', token, getAuthCookieOptions(req, true)).json({
         success: true,
         data: {
+            token,
+            tokenType: "Bearer",
+            expiresIn: 3600,
             user: {
                 username: user.username, 
                 createdAt: user.createdAt
@@ -93,6 +96,9 @@ router.post('/register', validate({
     return res.cookie('auth_token', token, getAuthCookieOptions(req, true)).json({
         success: true,
         data: {
+            token,
+            tokenType: "Bearer",
+            expiresIn: 3600,
             user: {
                 username: user.username,
                 createdAt: user.createdAt
@@ -100,6 +106,58 @@ router.post('/register', validate({
         }
     });
 
+});
+
+/**
+ * Standard OAuth 2.0 Token Endpoint
+ * Supports Resource Owner Password Credentials (grant_type=password)
+ * Returns RFC 6749 compliant token response
+ */
+router.post('/oauth/token', async (req, res) => {
+    const grantType = req.body.grant_type || "password";
+    const username = req.body.username;
+    const password = req.body.password;
+
+    if (grantType !== "password") {
+        return res.status(400).json({
+            error: "unsupported_grant_type",
+            error_description: "Only grant_type=password is currently supported"
+        });
+    }
+
+    if (!username || !password) {
+        return res.status(400).json({
+            error: "invalid_request",
+            error_description: "Missing username or password"
+        });
+    }
+
+    const user = await Users.getByUsername(username);
+    if (!user) {
+        return res.status(401).json({
+            error: "invalid_grant",
+            error_description: "Invalid credentials"
+        });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+        return res.status(401).json({
+            error: "invalid_grant",
+            error_description: "Invalid credentials"
+        });
+    }
+
+    const token = jwt.sign({ userId: user._id, sub: user._id }, Config.JWT_SECRET, {
+        expiresIn: "1h"
+    });
+
+    return res.json({
+        access_token: token,
+        token_type: "Bearer",
+        expires_in: 3600,
+        user_id: user._id
+    });
 });
 
 router.post('/logout', (req, res) => {
