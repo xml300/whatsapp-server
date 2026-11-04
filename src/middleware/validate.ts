@@ -72,15 +72,21 @@ export default function validate(config: ValidationConfig) {
 
         // 2. Validate Query
         if (config.query) {
-            req.query = req.query || {};
+            const queryData: Record<string, any> = { ...(req.query || {}) };
             for (const [key, ruleString] of Object.entries(config.query)) {
-                const { error, transformedValue } = await validateField(req.query[key], ruleString, key, "query");
+                const { error, transformedValue } = await validateField(queryData[key], ruleString, key, "query");
                 if (error) {
                     errors.push({ field: key, message: error, location: "query" });
                 } else if (transformedValue !== undefined) {
-                    req.query[key] = transformedValue as any;
+                    queryData[key] = transformedValue as any;
                 }
             }
+            Object.defineProperty(req, "query", {
+                value: queryData,
+                writable: true,
+                enumerable: true,
+                configurable: true
+            });
         }
 
         // 3. Validate Params
