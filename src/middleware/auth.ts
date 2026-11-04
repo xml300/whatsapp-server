@@ -7,11 +7,13 @@ export default async function authMiddleware(req: Request, res: Response, next: 
     const authHeader = req.headers["authorization"] || req.headers["Authorization"];
     if (typeof authHeader === "string") {
         const match = authHeader.match(/^Bearer\s+(.+)$/i);
-        if (match && match[1].trim()) {
-            const token = match[1].trim();
+        const token = match?.[1]?.trim();
+        if (token) {
             try {
-                const payload = jwt.verify(token, Config.JWT_SECRET) as JwtPayload;
-                const userId = payload.userId || payload.sub;
+                const payload = jwt.verify(token, Config.JWT_SECRET);
+                const userId = typeof payload === "object" && payload !== null
+                    ? (payload as JwtPayload).userId || (payload as JwtPayload).sub
+                    : undefined;
                 if (!userId || typeof userId !== "string") {
                     return res.status(401).json({
                         success: false,
